@@ -1,4 +1,3 @@
-
 '''
 Take thee again another scroll, and write in it all the former words that 
 were in the first scroll, which Jehoiakim the king of Judah hath burned.
@@ -17,6 +16,10 @@ class Khartes():
         self.app = app
         self.window = window
         window.show()
+        
+        # Add auto-load project
+        project_path = "/Users/jamesdarby/Documents/VesuviusScroll/GP/khartes/khartes_project/overlay_testing.khprj"  # Replace with your path
+        window.loadProject(project_path)
 
 fmt = QSurfaceFormat()
 # Note that pyQt5 only supports OpenGL versions 2.0, 2.1, and 4.1 Core :

@@ -1074,10 +1074,15 @@ class CachedZarrVolume():
             # (cause unknown!) during loading
             kernel = np.ones((3,3),dtype=np.bool_)
             mask = ndimage.binary_dilation(mask, kernel)
-            pass
 
         scale = level.scale
         data = level.trdatas[direction]
+
+        # For single resolution, allow larger view when zoomed out
+        if len(self.levels) == 1 and zarr_max_width > 0:
+            # Calculate effective zarr_max_width based on zoom level
+            effective_max_width = int(zarr_max_width / zoom)
+            zarr_max_width = effective_max_width
 
         z = zoom*scale
         it,jt,kt = oijkt
@@ -1112,7 +1117,6 @@ class CachedZarrVolume():
         (cx1,cy1),(cx2,cy2) = ((ax1,ay1),(ax2,ay2))
         # print("fi,j", fi, fj)
         # print("a", ((ax1,ay1),(ax2,ay2)))
-
 
         if zarr_max_width > 0:
             rb = self.getSliceBounds(axis, ijkt, zarr_max_width, direction)

@@ -128,6 +128,7 @@ class VolumesModel(QtCore.QAbstractTableModel):
 
     columns = [
             "Use",
+            "Overlay",
             "Name",
             "Color",
             "Ld",
@@ -146,6 +147,7 @@ class VolumesModel(QtCore.QAbstractTableModel):
 
     ctips = [
             "Select which volume is visible;\nclick box to select",
+            "Select which volume is displayed as an overlay;\nclick box to select",
             "Name of the volume",
             "Color of the volume outline drawn on slices;\nclick to edit",
             "Is volume currently loaded in memory\n(volumes that are not currently displayed\nare unloaded by default)",
@@ -168,21 +170,15 @@ tiff files is aligned with the slice vertical axes""",
     
     def flags(self, index):
         col = index.column()
-        # if col in (0,1,2):
-        #     return Qt.ItemIsEditable|Qt.ItemIsEnabled
-        oflags = super(VolumesModel, self).flags(index)
-        if col == 0:
-            # print(col, int(oflags))
+        if col in (0, 1):  # Both Use and Overlay columns get checkboxes
             nflags = Qt.ItemNeverHasChildren
             nflags |= Qt.ItemIsUserCheckable
             nflags |= Qt.ItemIsEnabled
-            # nflags |= Qt.ItemIsEditable
             return nflags
-        elif col== 2 or col == 4:
+        elif col == 3 or col == 5:  # Color and Direction columns
             nflags = Qt.ItemNeverHasChildren
-            # nflags |= Qt.ItemIsUserCheckable
             nflags |= Qt.ItemIsEnabled
-            # nflags |= Qt.ItemIsEditable
+            nflags |= Qt.ItemIsEditable
             return nflags
         else:
             return Qt.ItemNeverHasChildren|Qt.ItemIsEnabled
@@ -195,12 +191,12 @@ tiff files is aligned with the slice vertical axes""",
             if section == 0:
                 # print("HD", self.rowCount())
                 table = self.main_window.volumes_table
-                # make sure the combo box in column 4 is always open
+                # make sure the combo box in column 5 is always open
                 # (so no double-clicking required)
                 for i in range(self.rowCount()):
-                    index = self.createIndex(i, 2)
+                    index = self.createIndex(i, 3)
                     table.openPersistentEditor(index)
-                    index = self.createIndex(i, 4)
+                    index = self.createIndex(i, 5)
                     table.openPersistentEditor(index)
 
             return VolumesModel.columns[section]
@@ -236,12 +232,14 @@ tiff files is aligned with the slice vertical axes""",
         row = index.row()
         volumes = self.project_view.volumes
         volume = list(volumes.keys())[row]
-        selected = (self.project_view.cur_volume == volume)
-        if column == 0:
-            if selected:
-                return Qt.Checked
-            else:
-                return Qt.Unchecked
+        volume_view = volumes[volume]
+        
+        if column == 0:  # Use column
+            selected = (self.project_view.cur_volume == volume)
+            return Qt.Checked if selected else Qt.Unchecked
+        elif column == 1:  # Overlay column
+            return Qt.Checked if getattr(volume_view, 'is_overlay', False) else Qt.Unchecked
+        return None
 
     def dataAlignmentRole(self, index, role):
         # column = index.column()
@@ -266,23 +264,23 @@ tiff files is aligned with the slice vertical axes""",
         steps = volume.gijk_steps 
         sizes = volume.sizes
         selected = (self.project_view.cur_volume == volume)
-        if column == 1:
+        if column == 2:
             return volume.name
-        elif column == 2:
+        elif column == 3:
             # print("ddr", row, volume_view.color.name())
             return volume_view.color.name()
-        elif column == 3:
+        elif column == 4:
             if volume.data is None:
                 return 'No'
             else:
                 return 'Yes'
-        elif column == 4:
+        elif column == 5:
             # return "%s"%(('X','Y')[volume_view.direction])
             # print("data display role", row, volume_view.direction)
             return (0,1)[volume_view.direction]
 
-        elif column >= 5 and column < 14:
-            i3 = column-5
+        elif column >= 6 and column < 15:
+            i3 = column-6
             i = i3//3
             j = i3 %3
             x0 = mins[i]
@@ -294,7 +292,7 @@ tiff files is aligned with the slice vertical axes""",
                 return x0+dx*(nx-1)
             else:
                 return dx
-        elif column == 14:
+        elif column == 15:
             gb = volume.dataSize()/1000000000
             # print(volume.name,gb)
             return "%0.1f"%gb
@@ -304,37 +302,28 @@ tiff files is aligned with the slice vertical axes""",
     def setData(self, index, value, role):
         row = index.row()
         column = index.column()
-        # print("setdata", row, column, value, role)
-        # if role != Qt.EditRole:
-        #     return False
-        if role == Qt.CheckStateRole and column == 0:
-            # print(row, value)
+        
+        if role == Qt.CheckStateRole:
             cv = Qt.CheckState(value)
-            if cv != Qt.Checked:
-                self.main_window.setVolume(None)
-                return False
             volumes = self.project_view.volumes
             volume = list(volumes.keys())[row]
             volume_view = volumes[volume]
-            self.main_window.setVolume(volume)
-            # return True
-        if role == Qt.EditRole and column == 2:
-            color = value
-            volumes = self.project_view.volumes
-            volume = list(volumes.keys())[row]
-            volume_view = volumes[volume]
-            # print("setdata", row, color.name())
-            # volume_view.setColor(color)
-            self.main_window.setVolumeViewColor(volume_view, color)
-        if role == Qt.EditRole and column == 4:
-            # print("setdata", row, value)
-            direction = 0
-            if value == 'Y':
-                direction = 1
-            volumes = self.project_view.volumes
-            volume = list(volumes.keys())[row]
-            self.main_window.setDirection(volume, direction)
-
+            
+            if column == 0:  # Use column
+                if cv != Qt.Checked:
+                    self.main_window.setVolume(None)
+                    return True
+                self.main_window.setVolume(volume)
+                return True
+            elif column == 1:  # Overlay column
+                volume_view.is_overlay = (cv == Qt.Checked)
+                volume_view.notifyModified()
+                return True
+            
+        elif role == Qt.EditRole:
+            # ... existing EditRole handling ...
+            pass
+            
         return False
 
 
@@ -345,6 +334,7 @@ class VolumeView():
         self.volume = volume
         self.direction = 1
         self.trdata = None
+        self.is_overlay = False
         # itf, jtf, ktf are i,j,k of focus point (crosshairs)
         # in transposed-grid coordinates
         # so focus pixel = datatr[ktf, jtf, itf]

@@ -45,6 +45,9 @@ class ProjectView:
         self.settings['fragment']['triangles_visible'] = True
         self.settings['slices']['vol_boxes_visible'] = False
         '''
+        self.settings = {}
+        self.settings['gui'] = {}
+        self.settings['gui']['last_tab_index'] = 0
         self.vol_boxes_visible = False
 
     def alphabetizeVolumeViews(self):
@@ -99,7 +102,10 @@ class ProjectView:
         if self.cur_volume is not None:
             prj['cur_volume'] = self.cur_volume.name
         prj['vol_boxes_visible'] = self.vol_boxes_visible
+        prj['last_tab_index'] = self.settings['gui']['last_tab_index']
         info['project'] = prj
+
+        
 
         vvs = {}
         for vol in self.volumes.values():
@@ -220,6 +226,10 @@ class ProjectView:
                         break
             if 'vol_boxes_visible' in pinfo:
                 pv.vol_boxes_visible = pinfo['vol_boxes_visible']
+            if 'last_tab_index' in pinfo:
+                pv.settings['gui'] = {'last_tab_index': pinfo['last_tab_index']}
+            else:
+                pv.settings['gui'] = {'last_tab_index': 0}
 
         return pv
 
@@ -310,6 +320,10 @@ class ProjectView:
             elif fv.active and unaligned_ok:
                 fvs.append(fv)
         return fvs
+
+    def setLastTabIndex(self, index):
+        self.settings['gui']['last_tab_index'] = index
+        self.notifyModified()
 
 
 class Project:

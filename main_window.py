@@ -304,6 +304,10 @@ class PositionSetter(QWidget):
         self.main_window.recenterCurrentVolume(np.array([x, y, z]))
 
 
+
+
+
+
 class ZInterpolationSetter(QWidget):
     def __init__(self, main_window, parent=None):
         super(ZInterpolationSetter, self).__init__(parent)
@@ -911,7 +915,7 @@ class MainWindow(QMainWindow):
         "stream": {
             "cache_directory": "",
             "use_cache_directory": False,
-        },
+        }
     }
 
     # zarr_signal = Signal(str)
@@ -1026,7 +1030,8 @@ class MainWindow(QMainWindow):
         # GUI panel
         self.tab_panel = QTabWidget()
         self.tab_panel.setMinimumSize(QSize(200,200))
-
+        self.tab_panel.currentChanged.connect(self.onTabChanged)
+        
         grid.addWidget(self.xline, 0, 0, 2, 2)
         grid.addWidget(self.inline, 2, 0, 2, 2)
         grid.addWidget(self.depth, 4, 0, 2, 2)
@@ -1047,10 +1052,17 @@ class MainWindow(QMainWindow):
         self.addSettingsPanel()
         self.addDevToolsPanel()
         self.addVolumeAnnotationPanel()
-        # open Fragment panel
-        # TODO: should remember which panel was last opened
-        # by user
-        self.tab_panel.setCurrentIndex(1)
+        
+        # Remove the hardcoded tab index and use project settings if available
+        print("project view", self.project_view)
+        if self.project_view is not None:
+            print("project view", self.project_view.settings)
+            tab_index = self.project_view.settings['last_tab_index']
+            print("tab index", tab_index)
+        else:
+            tab_index = 0
+        
+        self.tab_panel.setCurrentIndex(tab_index)
 
         widget = QWidget()
         widget.setLayout(grid)
@@ -1489,8 +1501,8 @@ class MainWindow(QMainWindow):
         # get deleted on going out of scope
         self.volumes_csd = volumes_csd
         self.volumes_dsd = volumes_dsd
-        self.volumes_table.setItemDelegateForColumn(2, volumes_csd)
-        self.volumes_table.setItemDelegateForColumn(4, volumes_dsd)
+        self.volumes_table.setItemDelegateForColumn(3, volumes_csd)
+        self.volumes_table.setItemDelegateForColumn(5, volumes_dsd)
         # print("edit triggers", int(self.volumes_table.editTriggers()))
         # self.volumes_table.setEditTriggers(QAbstractItemView.AllEditTriggers)
         # print("mss", hh.minimumSectionSize())
@@ -3096,6 +3108,11 @@ class MainWindow(QMainWindow):
         # self.export_mesh_action.setEnabled(project_view.mainActiveFragmentView() is not None)
         # self.export_mesh_action.setEnabled(len(self.project_view.activeFragmentViews(unaligned_ok=True)) > 0)
         self.enableWidgetsIfActiveFragment()
+        print("set project view", project_view.settings['gui'])
+        if project_view is not None and 'last_tab_index' in project_view.settings['gui']:
+            tab_index = project_view.settings['gui']['last_tab_index']
+            print("setting tab index", tab_index)
+            self.tab_panel.setCurrentIndex(tab_index)
 
     def setProject(self, project):
         project_view = ProjectView(project)
@@ -3249,4 +3266,8 @@ class MainWindow(QMainWindow):
         # print(key, has_data, int(QThread.currentThreadId()))
         if has_data:
             self.zarr_signal.emit(key)
+
+    def onTabChanged(self, index):
+        if self.project_view is not None:
+            self.project_view.setLastTabIndex(index)
 
