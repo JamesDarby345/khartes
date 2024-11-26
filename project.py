@@ -321,9 +321,20 @@ class ProjectView:
                 fvs.append(fv)
         return fvs
 
+    def saveSettings(self):
+        info = {}
+        prj = {}
+        if self.cur_volume is not None:
+            prj['cur_volume'] = self.cur_volume.name
+        prj['vol_boxes_visible'] = self.vol_boxes_visible
+        prj['last_tab_index'] = self.settings['gui']['last_tab_index']
+        info['project'] = prj
+        info_txt = json.dumps(info, indent=4)
+        (self.project.path / 'views.json').write_text(info_txt, encoding="utf8")
+
     def setLastTabIndex(self, index):
         self.settings['gui']['last_tab_index'] = index
-        self.notifyModified()
+        self.saveSettings()  # Only save settings instead of full project state
 
 
 class Project:
