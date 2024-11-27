@@ -1882,6 +1882,9 @@ class GLDataWindowChild(QOpenGLWidget):
     def paintSlice(self):
         dw = self.gldw
         volume_view = dw.volume_view
+        if volume_view is None:
+            return
+        
         f = self.gl
         self.slice_program.bind()
 
@@ -1894,16 +1897,32 @@ class GLDataWindowChild(QOpenGLWidget):
 
         data_slice = np.zeros((wh,ww), dtype=np.uint16)
         zarr_max_width = self.gldw.getZarrMaxWidth()
-        paint_result = volume_view.paintSlice(
+        
+        # Paint base volume
+        if volume_view is not None:
+            paint_result = volume_view.paintSlice(
                 data_slice, self.gldw.axis, volume_view.ijktf, 
-                self.gldw.getZoom(), zarr_max_width)
+                self.gldw.getZoom(), zarr_max_width, is_overlay=False)
+
+        # Paint overlay volumes
+        pv = self.gldw.window.project_view
+        for overlay_vol in pv.getActiveOverlayVolumes():
+            # Get the volume view for this overlay volume
+            overlay_view = pv.volumes[overlay_vol]  # Get the volume view for this overlay
+            overlay_view.paintSlice(
+                data_slice, 
+                self.gldw.axis, 
+                volume_view.ijktf,
+                self.gldw.getZoom(), 
+                zarr_max_width, 
+                is_overlay=True
+            )
 
         base_tex = self.texFromData(data_slice, QImage.Format_Grayscale16)
         bloc = self.slice_program.uniformLocation("base_sampler")
         if bloc < 0:
             print("couldn't get loc for base sampler")
             return
-        # print("bloc", bloc)
         bunit = 1
         f.glActiveTexture(pygl.GL_TEXTURE0+bunit)
         base_tex.bind()

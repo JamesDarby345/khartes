@@ -212,7 +212,7 @@ tiff files is aligned with the slice vertical axes""",
         volumes = self.project_view.volumes
         return len(volumes.keys())
 
-    # columns: name, color, direction, xmin, xmax, xstep, y..., img...
+    # columns: use, overlay, name, color, direction, xmin, xmax, xstep, y..., img...
 
     def data(self, index, role):
         if self.project_view is None:
@@ -238,6 +238,7 @@ tiff files is aligned with the slice vertical axes""",
             selected = (self.project_view.cur_volume == volume)
             return Qt.Checked if selected else Qt.Unchecked
         elif column == 1:  # Overlay column
+            # selected = (self.project_view.cur_overlay_volume == volume)
             return Qt.Checked if getattr(volume_view, 'is_overlay', False) else Qt.Unchecked
         return None
 
@@ -316,13 +317,33 @@ tiff files is aligned with the slice vertical axes""",
                 self.main_window.setVolume(volume)
                 return True
             elif column == 1:  # Overlay column
-                volume_view.is_overlay = (cv == Qt.Checked)
+                if cv == Qt.Checked:
+                    self.project_view.addOverlayVolume(volume)
+                else:
+                    self.project_view.removeOverlayVolume(volume)
+                volume_view.is_overlay = (cv == Qt.Checked) #maintains state for the table checkbox, but not between sessions?
                 volume_view.notifyModified()
                 return True
             
         elif role == Qt.EditRole:
-            # ... existing EditRole handling ...
-            pass
+            if column == 3:
+                color = value
+                volumes = self.project_view.volumes
+                volume = list(volumes.keys())[row]
+                volume_view = volumes[volume]
+                # print("setdata", row, color.name())
+                # volume_view.setColor(color)
+                self.main_window.setVolumeViewColor(volume_view, color)
+            elif column == 5:
+                # print("setdata", row, value)
+                direction = 0
+                if value == 'Y':
+                    direction = 1
+                volumes = self.project_view.volumes
+                volume = list(volumes.keys())[row]
+                self.main_window.setDirection(volume, direction)
+
+
             
         return False
 
@@ -515,8 +536,8 @@ class VolumeView():
     def getSliceInRange(self, data, islice, jslice, k, axis):
         return self.volume.getSliceInRange(data, islice, jslice, k, axis)
 
-    def paintSlice(self, out, axis, ijkt, zoom, zarr_max_width):
-        return self.volume.paintSlice(out, axis, ijkt, zoom, zarr_max_width, self.direction)
+    def paintSlice(self, out, axis, ijkt, zoom, zarr_max_width, is_overlay=False):
+        return self.volume.paintSlice(out, axis, ijkt, zoom, zarr_max_width, self.direction, is_overlay)
 
     def getSlices(self, ijkt):
         return self.volume.getSlices(ijkt, self.direction)
@@ -1006,71 +1027,61 @@ class Volume():
         else: # inline
             return shape[0],shape[1]
 
-    def paintSlice(self, out, axis, ijkt, zoom, zarr_max_width, direction):
+    def paintSlice(self, out, axis, ijkt, zoom, zarr_max_width, direction, is_overlay=False):
+        print("paintSlice of volume; is overlay:", is_overlay)
         # zarr_max_width is ignored here; it only applies to zarr volumes
         data = self.trdatas[direction]
         z = zoom
-        it,jt,kt = ijkt
-        wh,ww = out.shape
-        whw = ww//2
-        whh = wh//2
+        it, jt, kt = ijkt
+        wh, ww = out.shape
+        whw = ww // 2
+        whh = wh // 2
         il, jl = self.ijIndexesInPlaneOfSlice(axis)
         fi, fj = ijkt[il], ijkt[jl]
         # slice width, height
-        sw = data.shape[2-il]
-        sh = data.shape[2-jl]
-        '''
-        test = self.getSliceInRange(
-                slice(0,None), slice(0,None), 0, 
-                axis, direction)
-        print(axis, data.shape, il, jl, sw, sh, test.shape)
-        '''
-        # print("sw,sh",z,il,jl,fi,fj,sw,sh)
-        zsw = max(int(z*sw), 1)
-        zsh = max(int(z*sh), 1)
+        sw = data.shape[2 - il]
+        sh = data.shape[2 - jl]
+        zsw = max(int(z * sw), 1)
+        zsh = max(int(z * sh), 1)
 
         # all coordinates below are in drawing window coordinates,
         # unless specified otherwise
         # location of upper left corner of data slice:
-        ax1 = int(whw-z*fi)
-        ay1 = int(whh-z*fj)
+        ax1 = int(whw - z * fi)
+        ay1 = int(whh - z * fj)
         # location of lower right corner of data slice:
-        ax2 = ax1+zsw
-        ay2 = ay1+zsh
-        # print(z,ax1,ay1,ax2,ay2)
+        ax2 = ax1 + zsw
+        ay2 = ay1 + zsh
         # locations of upper left and lower right corners of drawing window
         bx1 = 0
         by1 = 0
         bx2 = ww
         by2 = wh
         ri = Utils.rectIntersection(
-                ((ax1,ay1),(ax2,ay2)), ((bx1,by1),(bx2,by2)))
+            ((ax1, ay1), (ax2, ay2)), ((bx1, by1), (bx2, by2))
+        )
         if ri is not None:
             # upper left and lower right corners of intersected rectangle
-            (x1,y1),(x2,y2) = ri
+            (x1, y1), (x2, y2) = ri
             # corners of windowed data slice, in
             # data slice coordinates
-            x1s = int((x1-ax1)/z)
-            y1s = int((y1-ay1)/z)
-            x2s = int((x2-ax1)/z)
-            y2s = int((y2-ay1)/z)
-            # print(sw,sh,ww,wh)
-            # print(x1,y1,x2,y2)
-            # print(x1s,y1s,x2s,y2s)
-            slc = self.getSliceInRange(data,
-                    slice(x1s,x2s), slice(y1s,y2s), ijkt[axis], 
-                    axis)
-            # print(slc.shape)
-            # resize windowed data slice to its size in drawing
-            # window coordinates
+            x1s = int((x1 - ax1) / z)
+            y1s = int((y1 - ay1) / z)
+            x2s = int((x2 - ax1) / z)
+            y2s = int((y2 - ay1) / z)
+            slc = self.getSliceInRange(data, slice(x1s, x2s), slice(y1s, y2s), ijkt[axis], axis)
             if self.uses_overlay_colormap:
-                zslc = cv2.resize(slc, (x2-x1, y2-y1), interpolation=cv2.INTER_NEAREST)
+                zslc = cv2.resize(slc, (x2 - x1, y2 - y1), interpolation=cv2.INTER_NEAREST)
             else:
-                zslc = cv2.resize(slc, (x2-x1, y2-y1), interpolation=cv2.INTER_AREA)
-            # paste resized data slice into the intersection window
-            # in the drawing window
-            out[y1:y2, x1:x2] = zslc
-            
+                zslc = cv2.resize(slc, (x2 - x1, y2 - y1), interpolation=cv2.INTER_AREA)
+
+            # Only update non-zero pixels if this is an overlay
+            if is_overlay:
+                mask = zslc > 0
+                out[y1:y2, x1:x2][mask] = zslc[mask]
+            else:
+                out[y1:y2, x1:x2] = zslc
+
         return True
 
     def ijIndexesInPlaneOfSlice(self, axis):

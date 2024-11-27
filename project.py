@@ -49,6 +49,7 @@ class ProjectView:
         self.settings['gui'] = {}
         self.settings['gui']['last_tab_index'] = 0
         self.vol_boxes_visible = False
+        self.overlay_volumes = []
 
     def alphabetizeVolumeViews(self):
         vols = list(self.volumes.keys())
@@ -103,9 +104,8 @@ class ProjectView:
             prj['cur_volume'] = self.cur_volume.name
         prj['vol_boxes_visible'] = self.vol_boxes_visible
         prj['last_tab_index'] = self.settings['gui']['last_tab_index']
+        prj['overlay_volumes'] = [vol.name for vol in self.overlay_volumes]
         info['project'] = prj
-
-        
 
         vvs = {}
         for vol in self.volumes.values():
@@ -230,6 +230,13 @@ class ProjectView:
                 pv.settings['gui'] = {'last_tab_index': pinfo['last_tab_index']}
             else:
                 pv.settings['gui'] = {'last_tab_index': 0}
+            
+            if 'overlay_volumes' in pinfo:
+                for ovname in pinfo['overlay_volumes']:
+                    for vol in pv.volumes.keys():
+                        if vol.name == ovname:
+                            pv.addOverlayVolume(vol, no_notify=True)
+                            break
 
         return pv
 
@@ -335,6 +342,31 @@ class ProjectView:
     def setLastTabIndex(self, index):
         self.settings['gui']['last_tab_index'] = index
         self.saveSettings()  # Only save settings instead of full project state
+
+    def addOverlayVolume(self, volume, no_notify=False):
+        print("addOverlayVolume", volume.name)
+        if volume not in self.overlay_volumes:
+            self.overlay_volumes.append(volume)
+            if not no_notify:
+                self.notifyModified()
+                self.updateRendering()
+
+    def removeOverlayVolume(self, volume, no_notify=False):
+        print("removeOverlayVolume", volume.name)
+        if volume in self.overlay_volumes:
+            self.overlay_volumes.remove(volume)
+            if not no_notify:
+                self.notifyModified()
+                self.updateRendering()
+
+    def getActiveOverlayVolumes(self):
+        """Returns list of overlay volumes that are loaded and should be rendered"""
+        return [vol for vol in self.overlay_volumes if vol.data is not None]
+
+    def updateRendering(self):
+        # Instead of iterating through project_views, we should update the current window
+        if hasattr(self, 'glw'):
+            self.glw.update()
 
 
 class Project:

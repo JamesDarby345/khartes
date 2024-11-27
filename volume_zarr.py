@@ -1059,10 +1059,11 @@ class CachedZarrVolume():
 
     # returns True if out has been completely painted,
     # False otherwise
-    def paintLevel(self, out, axis, oijkt, zoom, direction, level, draw, zarr_max_width):
+    def paintLevel(self, out, axis, oijkt, zoom, direction, level, draw, zarr_max_width, is_overlay=False):
         # if not draw:
         #     return True
         # mask = (out == 0).astype(np.uint8)
+        print("paintLevel of zarr volume; is overlay:", is_overlay)
         mask = (out == 0)
         msum = mask.sum()
         if msum == 0: # no zeros
@@ -1169,11 +1170,12 @@ class CachedZarrVolume():
             if draw:
                 buf = np.zeros_like(out)
                 buf[y1:y2, x1:x2] = zslc
-                # if scale == 1.:
-                #     buf[buf != 0] = 24000
-                # if level.ilevel != 2:
-                #     buf[buf != 0] = 48000 - level.ilevel*5000
-                out[mask] = buf[mask]
+                # Only update non-zero pixels when in overlay mode
+                if is_overlay:
+                    mask = buf > 0
+                    out[mask] = buf[mask]
+                else:
+                    out[y1:y2, x1:x2] = zslc
         misses1 = level.klru.nz_misses
             
         # if misses0 = misses1, this means that there were no
@@ -1181,46 +1183,33 @@ class CachedZarrVolume():
         # print("  ms",axis,level.scale,misses0,misses1)
         return misses0 == misses1
 
-    def paintSlice(self, out, axis, ijkt, zoom, zarr_max_width, direction):
+    def paintSlice(self, out, axis, ijkt, zoom, zarr_max_width, direction, is_overlay=False):
+        # Paint the base volume first
+        print("paintSlice of zarr volume; is overlay:", is_overlay)
         level = self.levels[0]
         draw = True
         if len(self.levels) == 1:
-            self.paintLevel(
-                    out, axis, ijkt, zoom, direction, level, 
-                    draw, zarr_max_width)
-            return True
-        if len(self.levels) > 1:
+            self.paintLevel(out, axis, ijkt, zoom, direction, level, draw, zarr_max_width, is_overlay)
+        elif len(self.levels) > 1:
             for i in range(len(self.levels)):
                 level = self.levels[i]
                 lzoom = 1./level.scale
                 if lzoom < 2*zoom:
-                    # print("breaking", i, zoom, lzoom)
-                    # print("level", i, end='\r')
-                    # print("level", i)
                     break
 
-        # print("** axis",axis, out.shape, i)
         start = i
         for i in range(start,len(self.levels)):
             level = self.levels[i]
-            # print("level", axis, i, draw)
-            # zarr_max_width is set to 0 for the multi-resolution case
-            result = self.paintLevel(
-                    out, axis, ijkt, zoom, direction, 
-                    level, draw, 0)
+            result = self.paintLevel(out, axis, ijkt, zoom, direction, level, draw, 0, is_overlay)
             if result:
                 break
-                # draw = False
 
-        '''
-        for level in self.levels:
-            n = len(level.klru._values_cache)
-            if level.ilevel == start:
-                print('*', end='')
-            print(n, end=' ')
-        print(end='\r')
-        '''
-
+        # If this volume is being used as an overlay, use a different color mapping
+        if getattr(self, 'is_overlay', False):
+            # Apply overlay color mapping - you may want to customize this
+            mask = out > 0
+            out[mask] = 65535 - out[mask]  # Invert values for overlay
+        
         return True
 
     def ijIndexesInPlaneOfSlice(self, axis):
