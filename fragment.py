@@ -42,7 +42,7 @@ class FragmentsModel(QtCore.QAbstractTableModel):
             "Pts",
             "cm^2"
             ]
-
+    
     ctips = [
             "Select which fragment is active;\nclick box to select.\nNote that you can only select fragments\nwhich have the same direction (orientation)\nas the current volume view",
             "Select which fragments are visible;\nclick box to select",
@@ -53,30 +53,28 @@ class FragmentsModel(QtCore.QAbstractTableModel):
             "Number of points currently in fragment",
             "Fragment area in square centimeters"
             ]
-    
+
+    # Add these static methods
+    @staticmethod
+    def columnIndex(name):
+        return FragmentsModel.columns.index(name)
+
+    @staticmethod 
+    def columnIndices(names):
+        inds = []
+        for name in names:
+            inds.append(FragmentsModel.columnIndex(name))
+        return inds
+
     def flags(self, index):
         col = index.column()
         oflags = super(FragmentsModel, self).flags(index)
-        if col == 0:
+        if col in self.columnIndices(["Active", "Visible", "Hide\nMesh"]):
             nflags = Qt.ItemNeverHasChildren
             nflags |= Qt.ItemIsUserCheckable
             nflags |= Qt.ItemIsEnabled
             return nflags
-        elif col == 1:
-            # print(col, int(oflags))
-            nflags = Qt.ItemNeverHasChildren
-            nflags |= Qt.ItemIsUserCheckable
-            nflags |= Qt.ItemIsEnabled
-            # nflags |= Qt.ItemIsEditable
-            return nflags
-        elif col == 2:
-            # print(col, int(oflags))
-            nflags = Qt.ItemNeverHasChildren
-            nflags |= Qt.ItemIsUserCheckable
-            nflags |= Qt.ItemIsEnabled
-            # nflags |= Qt.ItemIsEditable
-            return nflags
-        elif col== 3:
+        elif col == self.columnIndex("Name"):
             nflags = Qt.ItemNeverHasChildren
             nflags |= Qt.ItemIsEnabled
             nflags |= Qt.ItemIsEditable
@@ -95,7 +93,7 @@ class FragmentsModel(QtCore.QAbstractTableModel):
                 # make sure the color button in column 3 is always open
                 # (so no double-clicking required)
                 for i in range(self.rowCount()):
-                    index = self.createIndex(i, 4)
+                    index = self.createIndex(i, self.columnIndex("Color"))
                     table.openPersistentEditor(index)
 
             return FragmentsModel.columns[section]
@@ -133,18 +131,18 @@ class FragmentsModel(QtCore.QAbstractTableModel):
         fragments = self.project_view.fragments
         fragment = list(fragments.keys())[row]
         fragment_view = fragments[fragment]
-        if column == 0:
+        if column == self.columnIndex("Active"):
             if fragment_view.active:
                 return Qt.Checked
             else:
                 return Qt.Unchecked
-        if column == 1:
+        if column == self.columnIndex("Visible"):
             if fragment_view.visible:
                 return Qt.Checked
             else:
                 return Qt.Unchecked
-        if column == 2:
-            # Note that column is "Hide Mesh", but
+        if column == self.columnIndex("Hide\nMesh"):
+            # Note that column is "Hide\nMesh", but
             # internal variable is mesh_visible
             if fragment_view.mesh_visible:
                 return Qt.Unchecked
@@ -169,17 +167,16 @@ class FragmentsModel(QtCore.QAbstractTableModel):
         fragments = self.project_view.fragments
         fragment = list(fragments.keys())[row]
         fragment_view = fragments[fragment]
-        if column == 3:
+        
+        if column == self.columnIndex("Name"):
             return fragment.name
-        elif column == 4:
-            # print("ddr", row, volume_view.color.name())
+        elif column == self.columnIndex("Color"):
             return fragment.color.name()
-        elif column == 5:
-            # print("data display role", row, volume_view.direction)
+        elif column == self.columnIndex("Dir"):
             return ('X','Y')[fragment.direction]
-        elif column == 6:
+        elif column == self.columnIndex("Pts"):
             return len(fragment.gpoints)
-        elif column == 7:
+        elif column == self.columnIndex("cm^2"):
             return "%.4f"%fragment_view.sqcm
         else:
             return None
@@ -187,55 +184,39 @@ class FragmentsModel(QtCore.QAbstractTableModel):
     def setData(self, index, value, role):
         row = index.row()
         column = index.column()
-        # print("setdata", row, column, value, role)
-        if role == Qt.CheckStateRole and column == 0:
-            # print("check", row, value)
-            fragments = self.project_view.fragments
-            fragment = list(fragments.keys())[row]
-            fragment_view = fragments[fragment]
-            exclusive = True
-            # print(self.main_window.app.keyboardModifiers())
-            if ((self.main_window.app.keyboardModifiers() & Qt.ControlModifier) 
-               or 
-               len(self.main_window.project_view.activeFragmentViews(unaligned_ok=True)) > 1):
-                exclusive = False
-            cv = Qt.CheckState(value)
-            self.main_window.setFragmentActive(fragment, cv==Qt.Checked, exclusive)
-            return True
-        elif role == Qt.CheckStateRole and column == 1:
-            # print(row, value)
-            fragments = self.project_view.fragments
-            fragment = list(fragments.keys())[row]
-            fragment_view = fragments[fragment]
-            cv = Qt.CheckState(value)
-            self.main_window.setFragmentVisibility(fragment, cv==Qt.Checked)
-            return True
-        elif role == Qt.CheckStateRole and column == 2:
-            # print(row, value)
-            fragments = self.project_view.fragments
-            fragment = list(fragments.keys())[row]
-            fragment_view = fragments[fragment]
-            # Note that column reads "Hide Mesh", but internal variable
-            # is mesh_visible
-            cv = Qt.CheckState(value)
-            self.main_window.setFragmentMeshVisibility(fragment, cv==Qt.Unchecked)
-            return True
-        elif role == Qt.EditRole and column == 3:
-            # print("setdata", row, value)
-            name = value
-            # print("sd name", value)
-            fragments = self.project_view.fragments
-            fragment = list(fragments.keys())[row]
-            # print("%s to %s"%(fragment.name, name))
-            if name != "":
-                self.main_window.renameFragment(fragment, name)
+        fragments = self.project_view.fragments
+        fragment = list(fragments.keys())[row]
+        fragment_view = fragments[fragment]
 
-        elif role == Qt.EditRole and column == 4:
-            # print("sd color", value)
-            fragments = self.project_view.fragments
-            fragment = list(fragments.keys())[row]
-            # print("setdata", row, color.name())
-            self.main_window.setFragmentColor(fragment, value)
+        if role == Qt.CheckStateRole:
+            cv = Qt.CheckState(value)
+            if column == self.columnIndex("Active"):
+                exclusive = True
+                if ((self.main_window.app.keyboardModifiers() & Qt.ControlModifier) 
+                   or 
+                   len(self.main_window.project_view.activeFragmentViews(unaligned_ok=True)) > 1):
+                    exclusive = False
+                self.main_window.setFragmentActive(fragment, cv==Qt.Checked, exclusive)
+                return True
+            elif column == self.columnIndex("Visible"):
+                self.main_window.setFragmentVisibility(fragment, cv==Qt.Checked)
+                return True
+            elif column == self.columnIndex("Hide\nMesh"):
+                print("hide", fragment, cv==Qt.Unchecked)
+                print("Hide column index:", self.columnIndex("Hide\nMesh"))
+                print("Current column:", column)
+                print("Setting mesh visibility to:", cv==Qt.Unchecked)
+                self.main_window.setFragmentMeshVisibility(fragment, cv==Qt.Unchecked)
+                # self.dataChanged.emit(index, index, [Qt.CheckStateRole])
+                return True
+
+        elif role == Qt.EditRole:
+            if column == self.columnIndex("Name"):
+                name = value
+                if name != "":
+                    self.main_window.renameFragment(fragment, name)
+            elif column == self.columnIndex("Color"):
+                self.main_window.setFragmentColor(fragment, value)
 
         return False
 

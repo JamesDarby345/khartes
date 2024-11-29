@@ -1883,11 +1883,10 @@ class MainWindow(QMainWindow):
             
         # Show confirmation dialog
         reply = QMessageBox.question(self, 'Delete Volume',
-                                   f'Are you sure you want to delete volume "{cv.name}"?',
-                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                               f'Are you sure you want to remove volume "{cv.name}" from the project?',
+                               QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
 
         if reply == QMessageBox.Yes:
-            # Remove from project
             self.volumes_table.model().beginResetModel()
             
             # Clear current volume if it's the one being deleted
@@ -1898,9 +1897,20 @@ class MainWindow(QMainWindow):
             for i, ovv in enumerate(pv.overlay_volume_views):
                 if ovv is not None and ovv.volume == cv:
                     self.setOverlay(i, None)
+        
+            # Remove the .volzarr file from the project's volumes directory
+            
+            volzarr_file = pv.project.volumes_path / (cv.name + '.volzarr')
+            print("volzarr_file", volzarr_file)
+            try:
+                if volzarr_file.exists():
+                    volzarr_file.unlink()
+            except Exception as e:
+                print(f"Warning: Failed to remove volzarr file {volzarr_file}: {e}")
                     
             pv.project.removeVolume(cv)
             self.volumes_table.model().endResetModel()
+            pv.project.notifyModified()
 
     def deleteActiveFragment(self):
         pv = self.project_view

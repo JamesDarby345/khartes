@@ -8,6 +8,7 @@ import numpy as np
 import numpy.linalg as npla
 import cv2
 
+from trgl_fragment import TrglFragmentView
 from utils import Utils
 from project import ProjectView
 from st import ST
@@ -80,6 +81,10 @@ class DataWindow(QLabel):
         # c = QCursor(Qt.CrossCursor)
         # px = c.pixmap()
         # print("pixmap", px)
+
+        self.selection_radius = 0
+        self.max_selection_radius = 10000
+        self.selected_nodes = set()
 
     def getDrawWidth(self, name):
         return self.window.draw_settings[name]["width"]
@@ -653,7 +658,7 @@ class DataWindow(QLabel):
         labels = ["X", "Y", "Img"]
         axes = (2,0,1)
         if vol.from_vc_render:
-            labels = ["X", "Img", "Y"]
+            labels = ["X", "IMG", "Y"]
             axes = (1,0,2)
         ranges = vol.getGlobalRanges()
         stxt = ""
@@ -959,25 +964,77 @@ class DataWindow(QLabel):
             return
         # print("wheel", e.angleDelta(), e.pixelDelta())
         # print("wheel", e.angleDelta().y(), e.pixelDelta())
-        self.setStatusTextFromMousePosition()
-        d = e.angleDelta().y()
-        z = self.volume_view.zoom
-        z *= 1.001**d
-        # print(d, z)
-        self.volume_view.setZoom(z)
-        mxy = (e.position().x(), e.position().y())
-        self.setNearbyTiffAndNode(mxy)
-        '''
-        nearbyTiffCorner = self.findNearbyTiffCorner(mxy)
-        self.setNearbyTiff(nearbyTiffCorner)
-        nearbyNode = -1
-        if nearbyTiffCorner < 0:
-            nearbyNode = self.findNearbyNode(mxy)
-        self.setNearbyNode(nearbyNode)
-        '''
-        self.window.drawSlices()
-        # print("wheel", e.position())
+        if self.localNearbyNodeIndex < 0:
+            self.setStatusTextFromMousePosition()
+            d = e.angleDelta().y()
+            z = self.volume_view.zoom
+            z *= 1.001**d
+            # print(d, z)
+            self.volume_view.setZoom(z)
+            mxy = (e.position().x(), e.position().y())
+            self.setNearbyTiffAndNode(mxy)
+            '''
+            nearbyTiffCorner = self.findNearbyTiffCorner(mxy)
+            self.setNearbyTiff(nearbyTiffCorner)
+            nearbyNode = -1
+            if nearbyTiffCorner < 0:
+                nearbyNode = self.findNearbyNode(mxy)
+            self.setNearbyNode(nearbyNode)
+            '''
+            self.window.drawSlices()
+            # print("wheel", e.position())
+        else:
+            delta = e.angleDelta().y()
+            if delta > 0:
+                self.selection_radius = min(self.selection_radius + 1, self.max_selection_radius)
+            else:
+                self.selection_radius = max(self.selection_radius - 1, 0)
+            self.updateNeighborSelection()
+            self.window.drawSlices()
+
         self.checkCursor()
+
+    def updateNeighborSelection(self):
+        # First check if there's a valid nearby node
+        if self.localNearbyNodeIndex < 0:
+            self.selected_nodes = set()
+            return
+
+        # Add bounds check before accessing cur_frag_pts_fv
+        if self.localNearbyNodeIndex >= len(self.cur_frag_pts_fv):
+            self.selected_nodes = set()
+            return
+
+        # Get fragment view and triangulation
+        fv = self.cur_frag_pts_fv[self.localNearbyNodeIndex]
+        
+        if fv is None or (not isinstance(fv, TrglFragmentView) and fv.tri is None):
+            return
+
+        # Start with the selected node
+        current_nodes = {self.localNearbyNodeIndex}
+        all_nodes = current_nodes.copy()
+
+        # Expand selection by radius
+        for _ in range(self.selection_radius):
+            next_nodes = set()
+            for node in current_nodes:
+                # Get immediate neighbors through triangles
+                if node >= len(self.cur_frag_pts_xyijk):
+                    continue
+                # Initialize with single integer value
+                neighbors = {int(self.cur_frag_pts_xyijk[node, 5])}
+                for tri in fv.trgls():
+                    if node in tri:
+                        neighbors.update(tri)
+                next_nodes.update(neighbors)
+            current_nodes = next_nodes - all_nodes
+            all_nodes.update(current_nodes)
+            if not current_nodes:
+                break
+
+        self.selected_nodes = all_nodes
+        print("selected_nodes", self.selected_nodes)
 
     # SurfaceWindow subclass overrides this
     # Don't allow it in ordinary slices, because once node moves
