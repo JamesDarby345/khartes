@@ -1834,4 +1834,3 @@ class FragmentView(BaseFragmentView):
             self.fragment.gpoints = self.fragment.gpoints_history.get()
             self.fragment.notifyModified()
             self.setLocalPoints(True, False)
-
