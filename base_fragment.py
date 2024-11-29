@@ -1,6 +1,7 @@
+import time
 from utils import Utils
 import numpy as np
-
+from scipy.spatial import KDTree
 from PyQt5.QtGui import QColor
 
 class BaseFragment:
@@ -229,6 +230,11 @@ class BaseFragmentView:
         self.modified = Utils.timestamp()
         self.local_points_modified = Utils.timestamp()
         self.normal_offset = 0.
+        self.kd_tree_2d = None  # For ij-based queries
+        self.kd_tree_3d = None  # For xyz-based queries
+        self.k_neighbors = 10   # Default number of neighbors
+        self.current_radius = 10.0  # Default radius in global units
+        self.selected_nodes = set()  # Store selected node indices
 
     def allowAutoExtrapolation(self):
         return False
@@ -406,4 +412,61 @@ class BaseFragmentView:
         # print(normal, axes)
         # return np.array((stxaxis, styaxis, normal)).T
         return axes
+
+    def buildKDTrees(self, recursion_ok):
+        if not recursion_ok:
+            return
+        """Build both 2D and 3D KD trees for different query types"""
+        print("building kd trees")
+        if not hasattr(self, 'vpoints') or self.vpoints is None or len(self.vpoints) == 0:
+            self.kd_tree_2d = None
+            self.kd_tree_3d = None
+            return
+            
+        # Build 2D tree using ij coordinates
+        self.kd_tree_2d = KDTree(self.vpoints[:, :2])
+        
+        # Build 3D tree using global xyz coordinates
+        if hasattr(self, 'fragment') and hasattr(self.fragment, 'gpoints'):
+            self.kd_tree_3d = KDTree(self.fragment.gpoints)
+
+    def updateSelectedNodes(self, point_index, k=None, radius=None, use_3d=False):
+        """
+        Select nodes either by k-nearest neighbors or radius.
+        Uses either 2D topology-based or 3D spatial-based selection.
+        
+        Args:
+            point_index: Index of the center point
+            k: Number of neighbors (if None, uses self.k_neighbors)
+            radius: Radius to search within (if provided, overrides k)
+            use_3d: If True, use 3D coordinates and kd_tree_3d
+        """
+        print("updateSelectedNodes", point_index, k, radius, use_3d)
+        tree = self.kd_tree_3d if use_3d else self.kd_tree_2d
+        points = self.fragment.gpoints if use_3d else self.vpoints[:, :2]
+        
+        if tree is None or point_index < 0 or point_index >= len(points):
+            print("tree is None or point_index out of range")
+            print("tree", tree)
+            print("points", len(points), point_index)
+            self.selected_nodes = set()
+            return
+            
+        if radius is not None:
+            # Radius-based query
+            indices = tree.query_ball_point(points[point_index], radius)
+            self.selected_nodes = set(indices)
+        else:
+            # K-nearest neighbors query
+            if k is None:
+                k = self.k_neighbors
+            k = min(k + 1, len(points))  # +1 to include the point itself
+            distances, indices = tree.query(points[point_index], k=k)
+            self.selected_nodes = set(indices.tolist())
+            
+        # Remove the query point itself
+        if point_index in self.selected_nodes:
+            self.selected_nodes.remove(point_index)
+
+        print("selected nodes", len(self.selected_nodes), self.selected_nodes)
 

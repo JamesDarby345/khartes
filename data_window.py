@@ -959,39 +959,61 @@ class DataWindow(QLabel):
         else:
             self.setBoundingNodes(None)
 
-    def wheelEvent(self, e):
+    def wheelEvent(self, event):
         if self.volume_view is None:
             return
-        # print("wheel", e.angleDelta(), e.pixelDelta())
-        # print("wheel", e.angleDelta().y(), e.pixelDelta())
-        if self.localNearbyNodeIndex < 0:
-            self.setStatusTextFromMousePosition()
-            d = e.angleDelta().y()
-            z = self.volume_view.zoom
-            z *= 1.001**d
-            # print(d, z)
-            self.volume_view.setZoom(z)
-            mxy = (e.position().x(), e.position().y())
-            self.setNearbyTiffAndNode(mxy)
-            '''
-            nearbyTiffCorner = self.findNearbyTiffCorner(mxy)
-            self.setNearbyTiff(nearbyTiffCorner)
-            nearbyNode = -1
-            if nearbyTiffCorner < 0:
-                nearbyNode = self.findNearbyNode(mxy)
-            self.setNearbyNode(nearbyNode)
-            '''
-            self.window.drawSlices()
-            # print("wheel", e.position())
-        else:
-            delta = e.angleDelta().y()
-            if delta > 0:
-                self.selection_radius = min(self.selection_radius + 1, self.max_selection_radius)
-            else:
-                self.selection_radius = max(self.selection_radius - 1, 0)
-            self.updateNeighborSelection()
-            self.window.drawSlices()
+        print("wheelEvent", event.angleDelta().y(), event.pixelDelta(), self.localNearbyNodeIndex)
 
+        # Get delta before any modifier checks
+        delta = event.angleDelta().y()
+        print("delta", delta)
+        
+        modifiers = QApplication.queryKeyboardModifiers()
+        use_neighbors = bool(modifiers & Qt.AltModifier)
+        use_radius = bool(modifiers & Qt.ControlModifier) 
+        fast_mode = bool(modifiers & Qt.MetaModifier) #Meta (Command/Windows key)
+
+        if not (use_neighbors or use_radius):
+            # Default zoom behavior
+            self.setStatusTextFromMousePosition()
+            z = self.volume_view.zoom
+            z *= 1.001**delta
+            self.volume_view.setZoom(z)
+            mxy = (event.position().x(), event.position().y())
+            self.setNearbyTiffAndNode(mxy)
+            self.window.drawSlices()
+            return
+
+        # Only run neighbor selection code if alt or ctrl pressed
+        print("wheelEvent nearby node selected")
+        pv = self.window.project_view
+        if pv is None or pv.nearby_node_fv is None:
+            return
+            
+        fv = pv.nearby_node_fv
+        if not hasattr(fv, 'updateSelectedNodes'):
+            print("fv has no updateSelectedNodes, returning")
+            return
+
+        if use_radius:
+            # Control + scroll: adjust radius for 3D spatial selection
+            current_radius = getattr(fv, 'current_radius', 10.0)
+            scale = 1.5 if fast_mode else 1.1
+            new_radius = current_radius * (scale if delta > 0 else 1/scale)
+            print("new_radius, scale, delta, current_radius", new_radius, scale, delta, current_radius)
+            fv.current_radius = max(0.1, new_radius)
+            fv.updateSelectedNodes(pv.nearby_node_index, radius=fv.current_radius, use_3d=True)
+        else:
+            # Alt + scroll: adjust k for topological selection
+            increment = 10 if fast_mode else 1
+            print("increment", increment, delta)
+            if delta > 0:
+                fv.k_neighbors = min(fv.k_neighbors + increment, len(fv.vpoints) - 1)
+            else:
+                fv.k_neighbors = max(1, fv.k_neighbors - increment)
+            fv.updateSelectedNodes(pv.nearby_node_index, k=fv.k_neighbors, use_3d=False)
+                
+        self.window.drawSlices()
         self.checkCursor()
 
     def updateNeighborSelection(self):
@@ -1008,6 +1030,7 @@ class DataWindow(QLabel):
         # Get fragment view and triangulation
         fv = self.cur_frag_pts_fv[self.localNearbyNodeIndex]
         
+        # If the fragment view is None or the triangulation is None, return
         if fv is None or (not isinstance(fv, TrglFragmentView) and fv.tri is None):
             return
 

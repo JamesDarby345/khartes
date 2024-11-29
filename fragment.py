@@ -1060,6 +1060,7 @@ class FragmentView(BaseFragmentView):
             ntrgl = len(self.tri.simplices)
         self.working_trgls = np.full((ntrgl,),True)
         # print("calculated sq cm")
+        super().buildKDTrees(recursion_ok)
         if not recursion_ok:
             return
         for fv in self.project_view.fragments.values():

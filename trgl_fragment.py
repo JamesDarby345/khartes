@@ -552,6 +552,8 @@ class TrglFragmentView(BaseFragmentView):
             self.working_fv.setLocalPoints(False)
             # print("after wfv slp")
 
+        super().buildKDTrees(recursion_ok)
+
 
     '''
     
