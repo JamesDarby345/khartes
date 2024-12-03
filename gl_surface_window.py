@@ -682,30 +682,23 @@ trgl_pts_code = {
     "vertex": '''
       #version 410 core
 
-      uniform vec4 node_color;
-      uniform vec4 highlight_node_color;
-      uniform int nearby_node_id;
+      layout(location=6) in vec4 vertex_color;  // New color attribute
       out vec4 color;
       uniform mat4 xform;
       layout(location=4) in vec2 stxy;
       void main() {
-        if (gl_VertexID == nearby_node_id) {
-          color = highlight_node_color;
-        } else {
-          color = node_color;
-        }
-        gl_Position = xform*vec4(stxy, 0.0, 1.0);
+        color = vertex_color;
+        gl_Position = xform*vec4(stxy, 0., 1.);
       }
-
     ''',
+
     "fragment": '''
       #version 410 core
 
       in vec4 color;
       out vec4 fColor;
 
-      void main()
-      {
+      void main() {
         fColor = color;
       }
     ''',
@@ -1422,21 +1415,9 @@ class GLSurfaceWindowChild(GLDataWindowChild):
         if fv.visible and node_thickness != 0 and node_alpha != 0:
             self.trgl_pts_program.bind()
             self.trgl_pts_program.setUniformValue("xform", xform)
-            highlight_node_color = [c/65535 for c in dw.highlightNodeColor]
-            highlight_node_color[3] = node_alpha
-            self.trgl_pts_program.setUniformValue("highlight_node_color", *highlight_node_color)
-            color = dw.nodeColor
-            if not fv.active:
-                color = dw.inactiveNodeColor
-            if not fv.mesh_visible:
-                color = fv.fragment.cvcolor
-            rgba = [c/65535 for c in color]
-            rgba[3] = node_alpha
-            self.trgl_pts_program.setUniformValue("node_color", *rgba)
 
             nearby_node_id = 2**30
             xywindow = dw.stxyWindowBounds()
-            # pts are in form stxy.x, stxy.y, index
             pts = self.getPointsInStxyWindow(fv, xywindow)
             xys = self.stxysToWindowXys(pts[:,:2])
             xyzs = fv.vpoints[np.int32(pts[:,2])]
@@ -1457,12 +1438,19 @@ class GLSurfaceWindowChild(GLDataWindowChild):
                     self.nearbyNode = ind
                     nearby_node_id = int(pts[ind,2])
 
-            # figure out highlighted node and set nearby_node_id
-            nniloc = self.trgl_pts_program.uniformLocation("nearby_node_id")
-            self.trgl_pts_program.setUniformValue(nniloc, int(nearby_node_id))
+            # Update colors based on node state
+            color = dw.nodeColor
+            if not fv.active:
+                color = dw.inactiveNodeColor
+            if not fv.mesh_visible:
+                color = fv.fragment.cvcolor
+            highlight_color = dw.highlightNodeColor
+            selected_color = dw.selectedNodeColor
+            
+            # Update the color VBO with current colors
+            fvao.updateNodeColors(color, highlight_color, selected_color, nearby_node_id, fv.selected_nodes)
                 
             f.glPointSize(node_thickness)
-            # print("fvao count", fvao.stxys_count)
             f.glDrawArrays(pygl.GL_POINTS, 0, fvao.stxys_count)
             self.trgl_pts_program.release()
 
@@ -1597,29 +1585,74 @@ class FragmentMapVao:
         self.normal_loc = normal_loc
         self.getVao()
 
+    def updateNodeColors(self, default_color, highlight_color, selected_color, nearby_node_id, selected_nodes):
+        """
+        Update the color buffer with default colors and highlight the nearby node
+        default_color: RGBA color for normal nodes
+        highlight_color: RGBA color for highlighted node
+        selected_color: RGBA color for selected nodes
+        nearby_node_id: index of node to highlight (-1 if none)
+        selected_nodes: set of node indices to highlight
+        """
+        if self.fragment_view is None:
+            return
+
+        f = self.gl
+        fv = self.fragment_view
+        
+        # Convert colors to float32 arrays
+        default_color_arr = np.array(default_color, dtype=np.float32) / 65535.0
+        highlight_color_arr = np.array(highlight_color, dtype=np.float32) / 65535.0
+        selected_color_arr = np.array(selected_color, dtype=np.float32) / 65535.0
+
+        highlight_color_arr = np.array([0,1,0,0], dtype=np.float32)
+        selected_color_arr = np.array([0,0,1,0], dtype=np.float32)
+        print("default_color_arr in update node colors", default_color_arr)
+        print("highlight_color_arr in update node colors", highlight_color_arr)
+        print("selected_color_arr in update node colors", selected_color_arr)
+        
+        # Create array of default colors for all nodes
+        colors = np.full((fv.vpoints.shape[0], 4), default_color_arr, dtype=np.float32)
+
+        # Set selected color for selected nodes
+        # print("selected_nodes in update node colors", selected_nodes)
+        if selected_nodes:
+            selected_indices = np.array(list(selected_nodes), dtype=np.int32)
+            # print("selected_indices in update node colors", selected_indices)
+            colors[selected_indices] = selected_color_arr
+        
+        print("nearby_node_id in update node colors", nearby_node_id)
+        # Set highlight color for nearby node if valid
+        if nearby_node_id >= 0 and nearby_node_id < len(colors):
+            colors[nearby_node_id] = highlight_color_arr
+
+        
+
+        # Update the color buffer
+        self.color_vbo.bind()
+        nbytes = colors.size * colors.itemsize
+        self.color_vbo.allocate(colors, nbytes)
+        self.color_vbo.release()
+
     def getVao(self):
         fv = self.fragment_view
         if fv is not None and self.vao_modified > fv.modified and self.vao_modified > fv.fragment.modified and self.vao_modified > fv.local_points_modified:
-            # print("returning existing vao")
             return self.vao
 
         self.vao_modified = Utils.timestamp()
-        # print("modifying vao")
 
         if self.vao is None:
             self.vao = QOpenGLVertexArrayObject()
             self.vao.create()
-            # print("creating new vao")
 
         if fv is None:
             return self.vao
 
-        # print("updating vao")
         self.vao.bind()
 
         f = self.gl
 
-
+        # Existing VBO setup code...
         self.xyz_vbo = QOpenGLBuffer()
         self.xyz_vbo.create()
         self.xyz_vbo.bind()
@@ -1635,9 +1668,7 @@ class FragmentMapVao:
                 xyzs.shape[1], int(pygl.GL_FLOAT), int(pygl.GL_FALSE), 
                 0, VoidPtr(0))
         self.xyz_vbo.release()
-        # This needs to be called while the current VAO is bound
         f.glEnableVertexAttribArray(self.xyz_loc)
-
 
         self.stxy_vbo = QOpenGLBuffer()
         self.stxy_vbo.create()
@@ -1657,9 +1688,7 @@ class FragmentMapVao:
                 stxys.shape[1], int(pygl.GL_FLOAT), int(pygl.GL_FALSE), 
                 0, VoidPtr(0))
         self.stxy_vbo.release()
-        # This needs to be called while the current VAO is bound
         f.glEnableVertexAttribArray(self.stxy_loc)
-
 
         self.normal_vbo = QOpenGLBuffer()
         self.normal_vbo.create()
@@ -1675,24 +1704,40 @@ class FragmentMapVao:
                 normals.shape[1], int(pygl.GL_FLOAT), int(pygl.GL_FALSE), 
                 0, VoidPtr(0))
         self.normal_vbo.release()
-        # This needs to be called while the current VAO is bound
         f.glEnableVertexAttribArray(self.normal_loc)
 
+        # Add color VBO
+        self.color_vbo = QOpenGLBuffer()
+        self.color_vbo.create()
+        self.color_vbo.bind()
+
+        # Initialize with white colors
+        default_colors = np.ones((fv.vpoints.shape[0], 4), dtype=np.float32)
+        self.colors_size = default_colors.size
+        nbytes = default_colors.size * default_colors.itemsize
+        self.color_vbo.allocate(default_colors, nbytes)
+        
+        f.glVertexAttribPointer(
+            6,  # location=6 as specified in shader
+            4,  # 4 components (RGBA)
+            int(pygl.GL_FLOAT),
+            int(pygl.GL_FALSE),
+            0,
+            VoidPtr(0)
+        )
+        self.color_vbo.release()
+        f.glEnableVertexAttribArray(6)
 
         self.ibo = QOpenGLBuffer(QOpenGLBuffer.IndexBuffer)
         self.ibo.create()
         self.ibo.bind()
 
-        # We may have a line, not a triangulated surface.
-        # Notice that indices must be uint8, uint16, or uint32
         fv_trgls = fv.trgls()
         self.is_line = False
         if fv_trgls is None:
             fv_line = fv.line
             if fv_line is not None:
                 self.is_line = True
-                # Despite the name "fv_trgls",
-                # this contains a line strip if self.is_line is True.
                 fv_trgls = fv.line[:,2]
             else:
                 fv_trgls = np.zeros((0,3), dtype=np.uint32)
@@ -1704,11 +1749,7 @@ class FragmentMapVao:
         nbytes = trgls.size*trgls.itemsize
         self.ibo.allocate(trgls, nbytes)
 
-        # print("nodes, trgls", pts3d.shape, trgls.shape)
-
         self.vao.release()
-        
-        # do not release ibo before vao is released!
         self.ibo.release()
 
         return self.vao

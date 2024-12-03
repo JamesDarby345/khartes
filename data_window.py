@@ -54,9 +54,10 @@ class DataWindow(QLabel):
         self.setMouseTracking(True)
         self.zoomMult = 1.
         m = 65535
-        self.nodeColor = (m,0,0,m)
+        self.nodeColor = (m,0,0,m)  # Red
         self.mutedNodeColor = ((3*m)//4,0,0,m)
-        self.highlightNodeColor = (0,m,m,m)
+        self.highlightNodeColor = (0,m,m,m)  # Cyan for nearby cursor node
+        self.selectedNodeColor = (0,m//2,m,m)  # Lighter blue for selected nodes
         self.boundingNodeColor = (m,m//4,m//4,m)
         self.inactiveNodeColor = (m//2,m//4,m//4,m)
         self.triLineColor = (3*m//4,2*m//4,3*m//4,m)
@@ -2054,6 +2055,8 @@ into and out of the viewing plane.
                 if (frag, pt[3]) == nearbyNode:
                     color = self.highlightNodeColor
                     self.nearbyNode = i0+i
+                elif pt[3] in frag.selected_nodes:
+                    color = self.selectedNodeColor
                 if size > 0:
                     self.drawNodeAtXy(outrgbx, xy, color, size)
                     if not apply_frag_node_opacity:
