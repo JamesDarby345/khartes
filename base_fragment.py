@@ -441,7 +441,7 @@ class BaseFragmentView:
             radius: Radius to search within (if provided, overrides k)
             use_3d: If True, use 3D coordinates and kd_tree_3d
         """
-        print("updateSelectedNodes", point_index, k, radius, use_3d)
+        print("updateSelectedNodes", point_index, k, radius, "use 3d:", use_3d)
         tree = self.kd_tree_3d if use_3d else self.kd_tree_2d
         points = self.fragment.gpoints if use_3d else self.vpoints[:, :2]
         

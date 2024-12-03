@@ -1604,12 +1604,6 @@ class FragmentMapVao:
         default_color_arr = np.array(default_color, dtype=np.float32) / 65535.0
         highlight_color_arr = np.array(highlight_color, dtype=np.float32) / 65535.0
         selected_color_arr = np.array(selected_color, dtype=np.float32) / 65535.0
-
-        highlight_color_arr = np.array([0,1,0,0], dtype=np.float32)
-        selected_color_arr = np.array([0,0,1,0], dtype=np.float32)
-        print("default_color_arr in update node colors", default_color_arr)
-        print("highlight_color_arr in update node colors", highlight_color_arr)
-        print("selected_color_arr in update node colors", selected_color_arr)
         
         # Create array of default colors for all nodes
         colors = np.full((fv.vpoints.shape[0], 4), default_color_arr, dtype=np.float32)
