@@ -416,15 +416,24 @@ class BaseFragmentView:
     def buildKDTrees(self, recursion_ok):
         if not recursion_ok:
             return
-        """Build both 2D and 3D KD trees for different query types"""
-        print("building kd trees")
+        print("building kd trees and adjacency list")
         if not hasattr(self, 'vpoints') or self.vpoints is None or len(self.vpoints) == 0:
             self.kd_tree_2d = None
             self.kd_tree_3d = None
+            self.adjacency_list = None
             return
-            
-        # Build 2D tree using ij coordinates
-        self.kd_tree_2d = KDTree(self.vpoints[:, :2])
+        
+        # Build adjacency list from triangles
+        trgls = self.trgls()
+        if trgls is not None and len(trgls) > 0:
+            self.adjacency_list = [set() for _ in range(len(self.vpoints))]
+            for tri in trgls:
+                a, b, c = tri
+                self.adjacency_list[a].update([b, c])
+                self.adjacency_list[b].update([a, c])
+                self.adjacency_list[c].update([a, b])
+        else:
+            self.adjacency_list = None
         
         # Build 3D tree using global xyz coordinates
         if hasattr(self, 'fragment') and hasattr(self.fragment, 'gpoints'):
@@ -433,7 +442,7 @@ class BaseFragmentView:
     def updateSelectedNodes(self, point_index, k=None, radius=None, use_3d=False):
         """
         Select nodes either by k-nearest neighbors or radius.
-        Uses either 2D topology-based or 3D spatial-based selection.
+        Uses either connectivity-based or 3D spatial-based selection.
         
         Args:
             point_index: Index of the center point
@@ -442,31 +451,60 @@ class BaseFragmentView:
             use_3d: If True, use 3D coordinates and kd_tree_3d
         """
         print("updateSelectedNodes", point_index, k, radius, "use 3d:", use_3d)
-        tree = self.kd_tree_3d if use_3d else self.kd_tree_2d
-        points = self.fragment.gpoints if use_3d else self.vpoints[:, :2]
         
-        if tree is None or point_index < 0 or point_index >= len(points):
-            print("tree is None or point_index out of range")
-            print("tree", tree)
-            print("points", len(points), point_index)
+        if point_index < 0 or point_index >= len(self.vpoints):
+            print("point_index out of range")
             self.selected_nodes = set()
             return
+
+        if use_3d:
+            # Use 3D KDTree for spatial queries
+            if self.kd_tree_3d is None:
+                print("3D tree is None")
+                self.selected_nodes = set()
+                return
             
-        if radius is not None:
-            # Radius-based query
-            indices = tree.query_ball_point(points[point_index], radius)
-            self.selected_nodes = set(indices)
+            points = self.fragment.gpoints
+            if radius is not None:
+                # Radius-based query
+                indices = self.kd_tree_3d.query_ball_point(points[point_index], radius)
+                self.selected_nodes = set(indices)
+            else:
+                # K-nearest neighbors query
+                if k is None:
+                    k = self.k_neighbors
+                k = min(k + 1, len(points))  # +1 to include the point itself
+                distances, indices = self.kd_tree_3d.query(points[point_index], k=k)
+                self.selected_nodes = set(indices.tolist())
         else:
-            # K-nearest neighbors query
-            if k is None:
-                k = self.k_neighbors
-            k = min(k + 1, len(points))  # +1 to include the point itself
-            distances, indices = tree.query(points[point_index], k=k)
-            self.selected_nodes = set(indices.tolist())
+            # Use adjacency list for connectivity-based queries
+            if self.adjacency_list is None:
+                print("Adjacency list is None")
+                self.selected_nodes = set()
+                return
             
+            # Start with the selected vertex
+            current_nodes = {point_index}
+            all_nodes = current_nodes.copy()
+            
+            # Number of steps to traverse
+            steps = radius if radius is not None else (k if k is not None else self.k_neighbors)
+            
+            # Traverse the graph using BFS
+            for _ in range(steps):
+                next_nodes = set()
+                for node in current_nodes:
+                    next_nodes.update(self.adjacency_list[node])
+                current_nodes = next_nodes - all_nodes
+                all_nodes.update(current_nodes)
+                if not current_nodes:  # No more nodes to explore
+                    break
+                
+            self.selected_nodes = all_nodes
+
         # Remove the query point itself
         if point_index in self.selected_nodes:
             self.selected_nodes.remove(point_index)
-
-        print("selected nodes", len(self.selected_nodes), self.selected_nodes)
+        
+        print("selected nodes", len(self.selected_nodes))
 
