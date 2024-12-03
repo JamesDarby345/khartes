@@ -230,8 +230,7 @@ class BaseFragmentView:
         self.modified = Utils.timestamp()
         self.local_points_modified = Utils.timestamp()
         self.normal_offset = 0.
-        self.kd_tree_2d = None  # For ij-based queries
-        self.kd_tree_3d = None  # For xyz-based queries
+        self.kd_tree = None  # For spatial queries
         self.k_neighbors = 10   # Default number of neighbors
         self.current_radius = 10.0  # Default radius in global units
         self.selected_nodes = set()  # Store selected node indices
@@ -416,10 +415,9 @@ class BaseFragmentView:
     def buildKDTrees(self, recursion_ok):
         if not recursion_ok:
             return
-        print("building kd trees and adjacency list")
+        print("building kd tree and adjacency list")
         if not hasattr(self, 'vpoints') or self.vpoints is None or len(self.vpoints) == 0:
-            self.kd_tree_2d = None
-            self.kd_tree_3d = None
+            self.kd_tree = None
             self.adjacency_list = None
             return
         
@@ -435,20 +433,20 @@ class BaseFragmentView:
         else:
             self.adjacency_list = None
         
-        # Build 3D tree using global xyz coordinates
+        # Build KD tree using global xyz coordinates
         if hasattr(self, 'fragment') and hasattr(self.fragment, 'gpoints'):
-            self.kd_tree_3d = KDTree(self.fragment.gpoints)
+            self.kd_tree = KDTree(self.fragment.gpoints)
 
     def updateSelectedNodes(self, point_index, k=None, radius=None, use_3d=False):
         """
         Select nodes either by k-nearest neighbors or radius.
-        Uses either connectivity-based or 3D spatial-based selection.
+        Uses either connectivity-based or spatial-based selection.
         
         Args:
             point_index: Index of the center point
             k: Number of neighbors (if None, uses self.k_neighbors)
             radius: Radius to search within (if provided, overrides k)
-            use_3d: If True, use 3D coordinates and kd_tree_3d
+            use_3d: If True, use spatial distance, otherwise use connectivity
         """
         print("updateSelectedNodes", point_index, k, radius, "use 3d:", use_3d)
         
@@ -458,23 +456,23 @@ class BaseFragmentView:
             return
 
         if use_3d:
-            # Use 3D KDTree for spatial queries
-            if self.kd_tree_3d is None:
-                print("3D tree is None")
+            # Use KDTree for spatial queries
+            if self.kd_tree is None:
+                print("KD tree is None")
                 self.selected_nodes = set()
                 return
             
             points = self.fragment.gpoints
             if radius is not None:
                 # Radius-based query
-                indices = self.kd_tree_3d.query_ball_point(points[point_index], radius)
+                indices = self.kd_tree.query_ball_point(points[point_index], radius)
                 self.selected_nodes = set(indices)
             else:
                 # K-nearest neighbors query
                 if k is None:
                     k = self.k_neighbors
                 k = min(k + 1, len(points))  # +1 to include the point itself
-                distances, indices = self.kd_tree_3d.query(points[point_index], k=k)
+                distances, indices = self.kd_tree.query(points[point_index], k=k)
                 self.selected_nodes = set(indices.tolist())
         else:
             # Use adjacency list for connectivity-based queries
