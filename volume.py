@@ -130,15 +130,9 @@ class OpacitySelectorDelegate(QtWidgets.QStyledItemDelegate):
         sb.setMaximum(1.0)
         sb.setDecimals(1)
         sb.setSingleStep(0.1)
-        # Hide selection color
-        # https://stackoverflow.com/questions/22356673/how-to-completely-disable-value-highlighting-of-qspinboxes
-        # sb.lineEdit().setStyleSheet("""QLineEdit { 
-        #                                selection-background-color: white;
-        #                                selection-color: black 
-        #                            }""")
         sb.valueChanged.connect(lambda d: self.onValueChanged(d, sb, index), Qt.QueuedConnection)
-        sb.kh_value = 0.
-        # sb.valueChanged.connect(lambda d: self.onValueChanged(d, sb, index))
+        sb.kh_value = -1.
+        sb.setValue(.5)
         return sb
 
     def onValueChanged(self, value, spin_box, model_index):
@@ -151,11 +145,13 @@ class OpacitySelectorDelegate(QtWidgets.QStyledItemDelegate):
         #     return
         self.table.model().setData(model_index, spin_box.value(), Qt.EditRole)
         # print("leaving ovc", spin_box.value())
+        spin_box.kh_value = value
         spin_box.lineEdit().deselect()
 
     def setEditorData(self, editor, index):
         # print("sed")
         opacity = index.data(Qt.DisplayRole)
+        editor.lineEdit().deselect()
         if opacity is not None:
             if editor.value() != opacity:
                 oev = editor.value()
@@ -168,6 +164,55 @@ class OpacitySelectorDelegate(QtWidgets.QStyledItemDelegate):
     def setModelData(self, editor, model, index):
         # opacity = index.data(Qt.DisplayRole)
         # print("smd", opacity, editor.value())
+        pass
+
+class MinMaxSelectorDelegate(QtWidgets.QStyledItemDelegate):
+
+    def __init__(self, table, parent=None):
+        super(MinMaxSelectorDelegate, self).__init__(parent)
+        self.table = table
+
+    def createEditor(self, parent, option, index):
+        sb = QtWidgets.QSpinBox(parent)
+        sb.setMinimum(0)
+        sb.setMaximum(255)
+        sb.setSingleStep(1)
+        sb.valueChanged.connect(lambda d: self.onValueChanged(d, sb, index), Qt.QueuedConnection)
+        sb.kh_value = -1.
+        sb.setValue(1)
+        # print("ce", sb.value())
+        return sb
+
+    def onValueChanged(self, value, spin_box, model_index):
+        # print("vch", value, spin_box.kh_value, spin_box.value())
+        if spin_box.kh_value == value:
+            # spin_box.lineEdit().deselect()
+            return
+        self.table.model().setData(model_index, spin_box.value(), Qt.EditRole)
+        # value is the new value requested by the spin box;
+        # changed_value is the value actually set in response.
+        # If changed_value is different than requested,
+        # set the spin box value to changed_value
+        changed_value = model_index.data(Qt.DisplayRole)
+        if changed_value != value:
+            # This seems recursive since it causes a call to
+            # onValueChange.  But the call passes through an event
+            # queue, so it is not directly recursive.  I think...
+            spin_box.setValue(changed_value)
+        spin_box.kh_value = value
+        spin_box.lineEdit().deselect()
+
+    def setEditorData(self, editor, index):
+        minmax = index.data(Qt.DisplayRole)
+        # print("sed", minmax)
+        if minmax is not None:
+            if editor.value() != minmax:
+                oev = editor.value()
+                octxt = editor.cleanText()
+                editor.kh_value = minmax
+                editor.setValue(minmax)
+
+    def setModelData(self, editor, model, index):
         pass
 
 class ColormapSelectorDelegate(QtWidgets.QStyledItemDelegate):
@@ -294,11 +339,11 @@ tiff files is aligned with the slice vertical axes""",
             "O2",
             "Name of the volume",
             "Color of the volume outline drawn on slices;\nclick to edit",
-            "Opacity",
+            "Opacity if overlaid (0.0 transparent, 1.0 opaque)",
             "Colormap",
-            "Min",
-            "Max",
-            "Ind",
+            "Colormap range minimum value (0 or more)",
+            "Colormap range maximum value (255 or less)",
+            "Is volume data of type 'indicator' (rather than 'continuous')",
             "Is volume currently loaded in memory\n(volumes that are not currently displayed\nare unloaded by default)",
             """Direction (orientation) of the volume;
 X means that the X axis in the original tiff 
@@ -331,7 +376,7 @@ tiff files is aligned with the slice vertical axes""",
             nflags |= Qt.ItemIsEnabled
             # nflags |= Qt.ItemIsEditable
             return nflags
-        elif col in self.columnIndices(["Color", "Dir", "Opacity", "Colormap"]):
+        elif col in self.columnIndices(["Color", "Dir", "Opacity", "Min", "Max", "Colormap"]):
             nflags = Qt.ItemNeverHasChildren
             # nflags |= Qt.ItemIsUserCheckable
             nflags |= Qt.ItemIsEnabled
@@ -358,6 +403,10 @@ tiff files is aligned with the slice vertical axes""",
                     index = self.createIndex(i, self.columnIndex("Colormap"))
                     table.openPersistentEditor(index)
                     index = self.createIndex(i, self.columnIndex("Opacity"))
+                    table.openPersistentEditor(index)
+                    index = self.createIndex(i, self.columnIndex("Min"))
+                    table.openPersistentEditor(index)
+                    index = self.createIndex(i, self.columnIndex("Max"))
                     table.openPersistentEditor(index)
 
             return VolumesModel.columns[section]
@@ -451,6 +500,12 @@ tiff files is aligned with the slice vertical axes""",
         elif column == self.columnIndex("Opacity"):
             # print("ddr", volume_view.opacity)
             return volume_view.opacity
+        elif column == self.columnIndex("Min"):
+            # print("ddr mn", volume_view.getColormapIntMin())
+            return volume_view.getColormapIntMin()
+        elif column == self.columnIndex("Max"):
+            # print("ddr mx", volume_view.getColormapIntMax())
+            return volume_view.getColormapIntMax()
 
             '''
         elif column >= 5 and column < 14:
@@ -552,10 +607,10 @@ tiff files is aligned with the slice vertical axes""",
             # self.main_window.setVolume(volume)
             self.setVolumeOrOverlay(column, volume)
             # return True
-        if role == Qt.CheckStateRole and column in self.columnIndices(["Ind"]):
+        elif role == Qt.CheckStateRole and column in self.columnIndices(["Ind"]):
             cv = Qt.CheckState(value)
             self.main_window.setColormapIsIndicator(volume_view, cv == Qt.Checked)
-        if role == Qt.EditRole and column == self.columnIndex("Color"):
+        elif role == Qt.EditRole and column == self.columnIndex("Color"):
             color = value
             # volumes = self.project_view.volumes
             # volume = list(volumes.keys())[row]
@@ -563,7 +618,7 @@ tiff files is aligned with the slice vertical axes""",
             # print("setdata", row, color.name())
             # volume_view.setColor(color)
             self.main_window.setVolumeViewColor(volume_view, color)
-        if role == Qt.EditRole and column == self.columnIndex("Dir"):
+        elif role == Qt.EditRole and column == self.columnIndex("Dir"):
             # print("setdata", row, value)
             direction = 0
             if value == 'Y':
@@ -571,11 +626,15 @@ tiff files is aligned with the slice vertical axes""",
             # volumes = self.project_view.volumes
             # volume = list(volumes.keys())[row]
             self.main_window.setDirection(volume, direction)
-        if role == Qt.EditRole and column == self.columnIndex("Opacity"):
+        elif role == Qt.EditRole and column == self.columnIndex("Opacity"):
             # volumes = self.project_view.volumes
             # volume_view = list(volumes.values())[row]
             self.main_window.setVolumeViewOpacity(volume_view, value)
-        if role == Qt.EditRole and column == self.columnIndex("Colormap"):
+        elif role == Qt.EditRole and column == self.columnIndex("Min"):
+            self.main_window.setVolumeViewColormapIntMin(volume_view, value)
+        elif role == Qt.EditRole and column == self.columnIndex("Max"):
+            self.main_window.setVolumeViewColormapIntMax(volume_view, value)
+        elif role == Qt.EditRole and column == self.columnIndex("Colormap"):
             # print("setdata", row, value)
             short_name = value
             full_name = ColormapSelectorDelegate.colormaps[short_name]
@@ -645,8 +704,36 @@ class VolumeView():
             if self.colormap_range[0] != mn:
                 self.colormap_range[0] = mn
                 changed = True
-        if not no_notify and changed:
-            self.notifyModified()
+        if changed:
+            v = self.volume
+            cmap = Utils.ColorMap(self.colormap_name, v.dtype, 1., self.colormap_range)
+            self.colormap_lut = cmap.lut
+            self.colormap_lut_timestamp = Utils.timestamp()
+            if not no_notify:
+                self.notifyModified()
+
+    def getColormapIntMin(self):
+        return int(round(self.colormap_range[0]*255))
+
+    def getColormapIntMax(self):
+        return int(round(self.colormap_range[1]*255))
+
+    def setColormapIntMin(self, value):
+        mx = self.getColormapIntMax()
+        if value > mx:
+            return
+        mn = value/255.
+        # print("setting mn to", mn)
+        self.setColormapRange(mn, None)
+
+    def setColormapIntMax(self, value):
+        mn = self.getColormapIntMin()
+        # print("mx value mn", value, mn)
+        if value < mn:
+            return
+        mx = value/255.
+        # print("setting mx to", mx)
+        self.setColormapRange(None, mx)
 
     def notifyModified(self, tstamp=""):
         if tstamp == "":

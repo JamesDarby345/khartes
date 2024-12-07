@@ -54,6 +54,7 @@ from volume import (
         DirectionSelectorDelegate,
         ColormapSelectorDelegate,
         OpacitySelectorDelegate,
+        MinMaxSelectorDelegate,
         ColorSelectorDelegate)
 from volume_zarr import CachedZarrVolume
 from ppm import Ppm
@@ -1492,6 +1493,8 @@ class MainWindow(QMainWindow):
         volumes_csd = ColorSelectorDelegate(self.volumes_table)
         volumes_cmsd = ColormapSelectorDelegate(self.volumes_table)
         volumes_osd = OpacitySelectorDelegate(self.volumes_table)
+        volumes_mnsd = MinMaxSelectorDelegate(self.volumes_table)
+        volumes_mxsd = MinMaxSelectorDelegate(self.volumes_table)
         # self.direction_selector_delegate = dsd
         # need to attach these to "self" so they don't
         # get deleted on going out of scope
@@ -1499,14 +1502,20 @@ class MainWindow(QMainWindow):
         self.volumes_cmsd = volumes_cmsd
         self.volumes_dsd = volumes_dsd
         self.volumes_osd = volumes_osd
+        self.volumes_mnsd = volumes_mnsd
+        self.volumes_mxsd = volumes_mxsd
         cind = VolumesModel.columnIndex("Color")
         cmind = VolumesModel.columnIndex("Colormap")
         dind = VolumesModel.columnIndex("Dir")
         oind = VolumesModel.columnIndex("Opacity")
+        mnind = VolumesModel.columnIndex("Min")
+        mxind = VolumesModel.columnIndex("Max")
         self.volumes_table.setItemDelegateForColumn(cind, volumes_csd)
         self.volumes_table.setItemDelegateForColumn(cmind, volumes_cmsd)
         self.volumes_table.setItemDelegateForColumn(dind, volumes_dsd)
         self.volumes_table.setItemDelegateForColumn(oind, volumes_osd)
+        self.volumes_table.setItemDelegateForColumn(mnind, volumes_mnsd)
+        self.volumes_table.setItemDelegateForColumn(mxind, volumes_mxsd)
         # print("edit triggers", int(self.volumes_table.editTriggers()))
         # self.volumes_table.setEditTriggers(QAbstractItemView.AllEditTriggers)
         # print("mss", hh.minimumSectionSize())
@@ -3148,6 +3157,14 @@ class MainWindow(QMainWindow):
         # print("svvo", volume_view.opacity, opacity)
         volume_view.setOpacity(opacity)
         # self.volumes_table.model().endResetModel()
+        self.drawSlices()
+
+    def setVolumeViewColormapIntMin(self, volume_view, value):
+        volume_view.setColormapIntMin(value)
+        self.drawSlices()
+
+    def setVolumeViewColormapIntMax(self, volume_view, value):
+        volume_view.setColormapIntMax(value)
         self.drawSlices()
 
     def setFragments(self):
