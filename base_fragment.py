@@ -411,6 +411,62 @@ class BaseFragmentView:
         # print(normal, axes)
         # return np.array((stxaxis, styaxis, normal)).T
         return axes
+    
+    def localStAxesBatched(self, indices):
+        """
+        Batch version of localStAxes that handles multiple indices at once.
+        Returns array of shape (n_indices, 3, 3) containing axes for each point.
+        """
+        n_indices = len(indices)
+        axes_list = np.zeros((n_indices, 3, 3), dtype=np.float64)
+        valid_axes = np.zeros(n_indices, dtype=bool)
+        
+        # Get all triangles at once
+        trgls = self.trgls()
+        if len(trgls) == 0:
+            return axes_list
+            
+        # Create mask for all relevant triangles
+        point_mask = np.isin(trgls, indices)
+        relevant_trgls = trgls[point_mask.any(axis=1)]
+        
+        if len(relevant_trgls) == 0:
+            return axes_list
+            
+        # Calculate normals for all relevant triangles at once
+        trgl_pts = self.vpoints[relevant_trgls, :3]
+        v1 = trgl_pts[:, 1] - trgl_pts[:, 0]
+        v2 = trgl_pts[:, 2] - trgl_pts[:, 0]
+        normals = np.cross(v1, v2)
+        
+        # Fix: Normalize normals - reshape norms to match normals shape
+        norms = np.linalg.norm(normals, axis=1)
+        mask = norms > 0
+        normals[mask] = normals[mask] / norms[mask, np.newaxis]
+        
+        # For each point, find its triangles and compute average normal
+        for i, idx in enumerate(indices):
+            # Find triangles containing this point
+            point_trgls_mask = (relevant_trgls == idx).any(axis=1)
+            if not point_trgls_mask.any():
+                continue
+                
+            # Average the normals
+            avg_normal = np.mean(normals[point_trgls_mask], axis=0)
+            norm = np.linalg.norm(avg_normal)
+            
+            if norm > 0:
+                avg_normal /= norm
+                # Calculate orthogonal axes
+                axes_list[i, 2] = avg_normal
+                axes_list[i, 0] = np.cross([0, 0, 1], avg_normal)
+                if np.all(axes_list[i, 0] == 0):
+                    axes_list[i, 0] = [1, 0, 0]
+                axes_list[i, 0] /= np.linalg.norm(axes_list[i, 0])
+                axes_list[i, 1] = np.cross(axes_list[i, 2], axes_list[i, 0])
+                valid_axes[i] = True
+        
+        return axes_list
 
     def buildKDTrees(self, recursion_ok):
         if not recursion_ok:
@@ -505,4 +561,5 @@ class BaseFragmentView:
             self.selected_nodes.remove(point_index)
         
         print("selected nodes", len(self.selected_nodes))
+        # return self.selected_nodes
 

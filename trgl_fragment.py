@@ -1354,6 +1354,68 @@ class TrglFragmentView(BaseFragmentView):
         self.fragment.notifyModified()
         return True
 
+    def movePoints(self, indices, new_vijks, update_xyz, update_st):
+        """
+        Efficiently move multiple points at once while preserving node connectivity.
+        """
+        timer = Utils.Timer()
+        timer.active = True # Enable timing
+        
+        vv = self.cur_volume_view
+        
+        # Convert all positions at once
+        timer.time("Start movePoints")
+        new_gijks = np.array([vv.transposedIjkToGlobalPosition(vijk) for vijk in new_vijks])
+        new_uijks = np.array([vv.transposedIjkToIjk(vijk) for vijk in new_vijks])
+        old_vijks = self.vpoints[indices, :3]
+        old_uijks = np.array([vv.transposedIjkToIjk(vijk) for vijk in old_vijks])
+        duijks = new_uijks - old_uijks
+        timer.time("Position conversions")
+
+        # Get axes for all points at once
+        axes_list = self.localStAxesBatched(indices)
+        timer.time("Get axes")
+
+        # Calculate new positions for all points at once
+        rduijks = np.array([axes.T @ duijk for axes, duijk in zip(axes_list, duijks)])
+        old_stxys = self.all_stpoints[indices]
+        new_stxys = old_stxys + rduijks[:, :2]
+        timer.time("Calculate new positions")
+
+        # Check for duplicate points
+        #TODO: is this necessary? it takes a long time with many points
+        if update_st and False:
+            for idx, new_stxy in zip(indices, new_stxys):
+                if (new_stxy != self.all_stpoints[idx]).all() and self.pointExists(new_stxy):
+                    print(f"move: point {idx} already exists")
+                    return
+
+        timer.time("Check duplicates")
+
+        # Update xyz coordinates if requested
+        if update_xyz:
+            self.fragment.gpoints[indices] = new_gijks
+            # Batch update local points
+            self.vpoints[indices, :3] = new_vijks
+            timer.time("Update xyz")
+
+        # Update st coordinates if requested
+        if update_st:
+            # Simply update the coordinates without adjusting triangulation
+            self.stpoints[indices] = new_stxys
+            self.all_stpoints[indices] = new_stxys
+            uvs = np.array([self.stxyToUv(stxy) for stxy in new_stxys])
+            self.fragment.gtpoints[indices] = uvs
+            
+            # Update area calculation
+            old_sqcm = self.calculateSqCmOfTrgls(self.trgls())
+            self.sqcm = old_sqcm
+            timer.time("Update st")
+
+        self.fragment.notifyModified()
+        timer.time("Notify modified")
+        return True
+
     def applyTrglDiff(self, ops, nps):
         result = TrglPointSet.trglDiff(ops, nps)
         if result is not None:

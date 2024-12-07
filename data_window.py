@@ -1081,7 +1081,7 @@ class DataWindow(QLabel):
             return
         key = e.key()
         # print(self.axis, key)
-        sgn = 1
+        sgn = 10 #TODO TEST change back to 1 after testing
         # print("kpe %x"%QGuiApplication.queryKeyboardModifiers())
         # TODO: See 
         # https://doc.qt.io/qt-6/qt.html#KeyboardModifier-enum

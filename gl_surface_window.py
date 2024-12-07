@@ -287,16 +287,22 @@ class GLSurfaceWindow(DataWindow):
         return xy
 
     def setNearbyNodeIjk(self, ijk, update_xyz, update_st):
-        # print("snnijk", ijk)
-        # NOTE that the two flags are switched below, because the
-        # flags have opposite values when passed to
-        # this window.
+        timer = Utils.Timer()
+        timer.active = True
+        
+        # Get initial state
+        timer.time("Start setNearbyNodeIjk")
+        
         update_xyz, update_st = update_st, update_xyz
         stxys = self.cur_frag_pts_stxy
         xyijks = self.cur_frag_pts_xyijk
         nearbyNode = self.localNearbyNodeIndex
         if nearbyNode < 0 or stxys.shape[0] == 0:
             return
+        
+        timer.time("Get initial state")
+
+        # Get fragment view and volume view
         fv = self.glw.active_vao.fragment_view
         vv = fv.cur_volume_view
         stxy = stxys[nearbyNode, 0:2]
@@ -304,37 +310,65 @@ class GLSurfaceWindow(DataWindow):
         gijk = vv.transposedIjkToGlobalPosition(ijk)
         ogijk = vv.transposedIjkToGlobalPosition(oijk)
 
-        # shift in transposed ijk coordinates:
+        timer.time("Get views and positions")
+
+        # Calculate shifts
         dijk = [ijk[i]-oijk[i] for i in range(3)]
-
-        # shift in global coordinates
         dgijk = [gijk[i]-ogijk[i] for i in range(3)]
+        
+        timer.time("Calculate shifts")
 
-        # print(dijk, dgijk)
-        # Use convention that ^ is outwards
+        # Get axes and calculate shift
         index = int(stxys[nearbyNode, 2])
-
         axes = fv.localStAxes(index)
-
         if axes is None:
             print("GLSurfaceWindow.setNearbyNodeIjk: could not compute axes")
             return
-
-        # Use transposed ijk coordinates to calculate
-        # the shift, since dijk represents the original user
-        # input in the map-view plane (up, down, right, left, in, out)
         shift = axes@dijk
+        
+        timer.time("Get axes and calculate shift")
 
-        # apply the shift to the global coordinates
+        # Move the nearby node
         ngijk = ogijk + shift
-
-        # And then transform the shifted result back to ijk coordinates:
         nijk = vv.globalPositionToTransposedIjk(ngijk)
-        # print(ngijk, nijk)
-
-        # This eventually ends up calling movePoint(), which
-        # is defined in both FragmentView and TrglFragmentView.
         super(GLSurfaceWindow, self).setNearbyNodeIjk(nijk, update_xyz, update_st)
+        
+        timer.time("Move nearby node")
+
+        # Handle selected nodes if any
+        if fv.selected_nodes:
+            # Convert selected_nodes set to numpy array for indexing
+            selected_indices = np.array(list(fv.selected_nodes))
+            
+            # Get all selected nodes' positions at once
+            selected_oijks = fv.vpoints[selected_indices]
+            
+            # Convert all positions to global coordinates at once
+            selected_ogijks = np.array([vv.transposedIjkToGlobalPosition(p[:3]) for p in selected_oijks])
+            
+            timer.time("Get selected node positions")
+            
+            # Apply shift to all nodes at once
+            selected_ngijks = selected_ogijks + shift
+            
+            # Convert back to ijk coordinates
+            selected_nijks = np.array([vv.globalPositionToTransposedIjk(p) for p in selected_ngijks])
+            
+            timer.time("Calculate new positions")
+
+            # Move all points at once if possible
+            if hasattr(fv, 'movePoints'):
+                print("movePoints", len(selected_indices))
+                fv.movePoints(selected_indices, selected_nijks, update_xyz, update_st)
+            else:
+                # Fallback to individual moves if batch move not available
+                print("falling back to movePoint", len(selected_indices))
+                for idx, new_pos in zip(selected_indices, selected_nijks):
+                    fv.movePoint(idx, new_pos, update_xyz, update_st)
+                
+            timer.time("Move selected nodes")
+
+        timer.time("Complete")
 
     def stxyWindowBounds(self):
         stxy = self.volume_view.stxytf
