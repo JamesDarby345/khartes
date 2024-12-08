@@ -1384,13 +1384,13 @@ class TrglFragmentView(BaseFragmentView):
 
         # Check for duplicate points
         #TODO: is this necessary? it takes a long time with many points
-        if update_st and False:
-            for idx, new_stxy in zip(indices, new_stxys):
-                if (new_stxy != self.all_stpoints[idx]).all() and self.pointExists(new_stxy):
-                    print(f"move: point {idx} already exists")
-                    return
+        # if update_st:
+        #     for idx, new_stxy in zip(indices, new_stxys):
+        #         if (new_stxy != self.all_stpoints[idx]).all() and self.pointExists(new_stxy):
+        #             print(f"move: point {idx} already exists")
+        #             return
 
-        timer.time("Check duplicates")
+        # timer.time("Check duplicates")
 
         # Update xyz coordinates if requested
         if update_xyz:

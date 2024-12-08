@@ -414,19 +414,18 @@ class BaseFragmentView:
     
     def localStAxesBatched(self, indices):
         """
-        Batch version of localStAxes that handles multiple indices at once.
+        Fully vectorized version of localStAxes that handles multiple indices at once.
         Returns array of shape (n_indices, 3, 3) containing axes for each point.
         """
         n_indices = len(indices)
         axes_list = np.zeros((n_indices, 3, 3), dtype=np.float64)
-        valid_axes = np.zeros(n_indices, dtype=bool)
         
-        # Get all triangles at once
+        # Get all triangles
         trgls = self.trgls()
         if len(trgls) == 0:
             return axes_list
             
-        # Create mask for all relevant triangles
+        # Find all triangles containing any of the query points
         point_mask = np.isin(trgls, indices)
         relevant_trgls = trgls[point_mask.any(axis=1)]
         
@@ -439,32 +438,43 @@ class BaseFragmentView:
         v2 = trgl_pts[:, 2] - trgl_pts[:, 0]
         normals = np.cross(v1, v2)
         
-        # Fix: Normalize normals - reshape norms to match normals shape
-        norms = np.linalg.norm(normals, axis=1)
+        # Normalize all normals at once
+        norms = np.linalg.norm(normals, axis=1, keepdims=True)
         mask = norms > 0
-        normals[mask] = normals[mask] / norms[mask, np.newaxis]
+        normals = np.where(mask, normals / norms, 0)
         
-        # For each point, find its triangles and compute average normal
+        # Create a mapping from point indices to their normals
+        point_to_normals = {idx: [] for idx in indices}
+        for i, trgl in enumerate(relevant_trgls):
+            for vertex in trgl:
+                if vertex in point_to_normals:
+                    point_to_normals[vertex].append(normals[i])
+        
+        # Convert lists to arrays and compute average normals
+        avg_normals = np.zeros((n_indices, 3))
         for i, idx in enumerate(indices):
-            # Find triangles containing this point
-            point_trgls_mask = (relevant_trgls == idx).any(axis=1)
-            if not point_trgls_mask.any():
-                continue
-                
-            # Average the normals
-            avg_normal = np.mean(normals[point_trgls_mask], axis=0)
-            norm = np.linalg.norm(avg_normal)
-            
-            if norm > 0:
-                avg_normal /= norm
-                # Calculate orthogonal axes
-                axes_list[i, 2] = avg_normal
-                axes_list[i, 0] = np.cross([0, 0, 1], avg_normal)
-                if np.all(axes_list[i, 0] == 0):
-                    axes_list[i, 0] = [1, 0, 0]
-                axes_list[i, 0] /= np.linalg.norm(axes_list[i, 0])
-                axes_list[i, 1] = np.cross(axes_list[i, 2], axes_list[i, 0])
-                valid_axes[i] = True
+            if point_to_normals[idx]:
+                normal = np.mean(point_to_normals[idx], axis=0)
+                norm = np.linalg.norm(normal)
+                if norm > 0:
+                    avg_normals[i] = normal / norm
+        
+        # Compute all axes at once
+        z_axis = np.array([0., 0., 1.])
+        
+        # Calculate x axes (cross product with z_axis)
+        x_axes = np.cross(np.tile(z_axis, (n_indices, 1)), avg_normals)
+        x_norms = np.linalg.norm(x_axes, axis=1, keepdims=True)
+        mask = x_norms > 0
+        x_axes = np.where(mask, x_axes / x_norms, np.array([1., 0., 0.]))
+        
+        # Calculate y axes (cross product of normal and x axis)
+        y_axes = np.cross(avg_normals, x_axes)
+        
+        # Stack all axes
+        axes_list[:, 0] = x_axes
+        axes_list[:, 1] = y_axes
+        axes_list[:, 2] = avg_normals
         
         return axes_list
 

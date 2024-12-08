@@ -288,13 +288,15 @@ class DataWindow(QLabel):
 
     # overridden in GLSurfaceWindow
     def setNearbyNodeIjk(self, ijk, update_xyz, update_st):
-        # print("snni", update_xyz, update_st)
+        timer = Utils.Timer()
+        timer.active = True        # print("snni", update_xyz, update_st)
         xyijks = self.cur_frag_pts_xyijk
         nearbyNode = self.localNearbyNodeIndex
         if nearbyNode >= 0 and xyijks is not None and xyijks.shape[0] != 0:
             tijk = xyijks[nearbyNode, 2:5]
             index = int(xyijks[nearbyNode, 5])
             fv = self.cur_frag_pts_fv[nearbyNode]
+            timer.time("Get fragment view")
             new_tijk = list(tijk)
             i,j,k = ijk
             new_tijk[self.iIndex] = i
@@ -302,6 +304,7 @@ class DataWindow(QLabel):
             new_tijk[self.axis] = k
             # True if successful
             # if fv.movePoint(index, new_tijk):
+            timer.time("update tijk")
             if self.window.movePoint(fv, index, new_tijk, update_xyz, update_st):
                 # wpos = e.localPos()
                 # wxy = (wpos.x(), wpos.y())
@@ -312,9 +315,11 @@ class DataWindow(QLabel):
                 # wants to continue using the key to move the node even
                 # if the node moves out of "nearby" range
                 self.window.drawSlices()
+                timer.time("Draw slices")
                 # but need to keep track of current nearest
                 # node in case node numbering in window changes
                 self.updateNearbyNode()
+                timer.time("Update nearby node")
                 '''
                 old_local_nearby = self.localNearbyNodeIndex
                 pv = self.window.project_view

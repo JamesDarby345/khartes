@@ -331,9 +331,16 @@ class GLSurfaceWindow(DataWindow):
         # Move the nearby node
         ngijk = ogijk + shift
         nijk = vv.globalPositionToTransposedIjk(ngijk)
-        super(GLSurfaceWindow, self).setNearbyNodeIjk(nijk, update_xyz, update_st)
+        timer.time("Convert to transposed ijk")
         
-        timer.time("Move nearby node")
+        # Instead of using super().setNearbyNodeIjk, directlymove the point
+        if self.window.movePoint(fv, index, nijk, update_xyz, update_st):
+            # Update the OpenGL rendering
+            self.glw.update()
+            timer.time("Update GL window")
+            # Keep track of current nearest node in case node numbering changes
+            self.updateNearbyNode()
+            timer.time("Update nearby node")
 
         # Handle selected nodes if any
         if fv.selected_nodes:
@@ -367,6 +374,10 @@ class GLSurfaceWindow(DataWindow):
                     fv.movePoint(idx, new_pos, update_xyz, update_st)
                 
             timer.time("Move selected nodes")
+            
+            # Update the OpenGL rendering again after moving selected nodes
+            self.glw.update()
+            timer.time("Final GL update")
 
         timer.time("Complete")
 
