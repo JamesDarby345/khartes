@@ -2100,7 +2100,6 @@ class MainWindow(QMainWindow):
                 f.write("# Swiss Roll OBJ File\n")
                 
                 # Write vertices and texture coordinates
-                vertex_count = 1
                 for z in z_points:
                     for i in range(len(x)):
                         # Write vertex
@@ -2120,6 +2119,44 @@ class MainWindow(QMainWindow):
                         # Split rectangle into two triangles with texture coordinates
                         f.write(f"f {v1}/{v1} {v2}/{v2} {v3}/{v3}\n")  # First triangle
                         f.write(f"f {v1}/{v1} {v3}/{v3} {v4}/{v4}\n")  # Second triangle
+            
+            # def loadObjFile(self, fname):
+            #     trgl_frags = TrglFragment.load(fname)
+            #     if trgl_frags is None or len(trgl_frags) == 0:
+            #         return
+            #     trgl_frag = trgl_frags[0]
+            #     pv = self.project_view
+            #     proj = pv.project
+            #     self.fragments_table.model().beginResetModel()
+            #     proj.addFragment(trgl_frag)
+            #     pv.updateFragmentViews()
+            #     print("lof", len(pv.fragments), len(trgl_frag.gpoints))
+            #     self.fragments_table.model().endResetModel()
+
+            # Load the created fragment using TrglFragment.load
+            # fragments = TrglFragment.load(filename)
+            self.loadObjFile(filename)
+            # if fragments is not None and len(fragments) > 0:
+            #     self.fragments_table.model().beginResetModel()
+            #     for frag in fragments:
+            #         pv.project.addFragment(frag)
+            #         # Create fragment view and build KD trees
+            #         frag_view = frag.createView(pv)
+            #         pv.fragments[frag] = frag_view
+            #         # Build KD trees with recursion allowed
+            #         frag_view.buildKDTrees(True)
+                    
+            #     self.setFragments()
+            #     self.fragments_table.model().endResetModel()
+                
+            #     # Set the fragment as active
+            #     self.setFragmentActive(fragments[0], True, True)
+            #     self.enableWidgetsIfActiveFragment()
+                
+            #     # Scroll to the new fragment
+            #     self.app.processEvents()
+            #     index = pv.project.fragments.index(fragments[0])
+            #     self.fragments_table.model().scrollToRow(index)
 
             
             
