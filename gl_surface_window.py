@@ -1660,7 +1660,7 @@ class FragmentMapVao:
             # print("selected_indices in update node colors", selected_indices)
             colors[selected_indices] = selected_color_arr
         
-        print("nearby_node_id in update node colors", nearby_node_id)
+        # print("nearby_node_id in update node colors", nearby_node_id)
         # Set highlight color for nearby node if valid
         if nearby_node_id >= 0 and nearby_node_id < len(colors):
             colors[nearby_node_id] = highlight_color_arr

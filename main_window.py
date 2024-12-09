@@ -8,6 +8,7 @@ import numpy as np
 import platform
 import traceback
 import numcodecs
+import math
 
 from PyQt5.QtWidgets import (
         QAction,
@@ -336,6 +337,14 @@ class CreateFragmentButton(QPushButton):
     def onButtonClicked(self, s):
         self.main_window.createFragment()
 
+class CreateSwissRollFragmentButton(QPushButton):
+    def __init__(self, main_window, parent=None):
+        super(CreateSwissRollFragmentButton, self).__init__("Swiss Roll", parent)
+        self.main_window = main_window
+        self.clicked.connect(self.onButtonClicked)
+
+    def onButtonClicked(self, s):
+        self.main_window.createSwissRollFragment()
 
 class CopyActiveFragmentButton(QPushButton):
     def __init__(self, main_window, parent=None):
@@ -1307,9 +1316,12 @@ class MainWindow(QMainWindow):
         label.setAlignment(Qt.AlignCenter)
         # hlayout.addWidget(label)
         create_frag = CreateFragmentButton(self)
+        create_swiss_roll_frag = CreateSwissRollFragmentButton(self)
         # print("dark mode", self.isDarkMode())
         create_frag.setStyleSheet("QPushButton { %s; padding: 5; }"%self.highlightedBackgroundStyle())
+        create_swiss_roll_frag.setStyleSheet("QPushButton { %s; padding: 5; }"%self.highlightedBackgroundStyle())
         hlayout.addWidget(create_frag)
+        hlayout.addWidget(create_swiss_roll_frag)
         label = QLabel("Active fragment:")
         # label.setStyleSheet("QLabel { background-color : beige; padding-left: 5}")
         label.setStyleSheet("QLabel { padding-left: 5}")
@@ -2046,6 +2058,72 @@ class MainWindow(QMainWindow):
         self.app.processEvents()
         index = pv.project.fragments.index(frag)
         self.fragments_table.model().scrollToRow(index)
+
+    def createSwissRollFragment(self):
+        """Creates a swiss roll fragment based on dialog parameters"""
+        print("createSwissRollFragment")
+        pv = self.project_view
+        if pv is None:
+            print("Warning, cannot create new fragment without project")
+            return
+
+        dialog = SwissRollDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            values = dialog.getValues()
+            z_max = values['z_max']
+            z_min = values['z_min']
+            z_step = values['z_step']
+            xy_points = values['xy_points']
+            x_loc = values['x_loc']
+            y_loc = values['y_loc']
+            wraps = values['wraps']
+            total_width = values['total_width']
+
+            # Create swiss roll points
+            t = np.linspace(0, wraps * 2 * np.pi, xy_points)
+            radius = total_width / (2 * wraps * 2 * np.pi)
+            x = x_loc + radius * t * np.cos(t)
+            y = y_loc + radius * t * np.sin(t)
+            
+            # Create z points
+            z_points = np.linspace(z_min, z_max, int((z_max - z_min) / z_step))
+            
+            # Create output directory if it doesn't exist
+            os.makedirs('temp', exist_ok=True)
+            
+            # Generate timestamp
+            timestamp = time.strftime("%Y%m%d_%H:%M:%S", time.gmtime())
+            filename = f'temp/swiss_roll_{timestamp}.obj'
+            
+            # Write points and faces to OBJ file
+            with open(filename, 'w') as f:
+                f.write("# Swiss Roll OBJ File\n")
+                
+                # Write vertices and texture coordinates
+                vertex_count = 1
+                for z in z_points:
+                    for i in range(len(x)):
+                        # Write vertex
+                        f.write(f"v {x[i]} {y[i]} {z}\n")
+                        # Write texture coordinates - normalize t to [0,1] and z to [0,1]
+                        u = t[i] / (wraps * 2 * np.pi)  # Normalize t parameter
+                        v = (z - z_min) / (z_max - z_min)  # Normalize z coordinate
+                        f.write(f"vt {u} {v}\n")
+                
+                # Write faces as triangles with texture coordinates
+                for z_idx in range(len(z_points)-1):
+                    for i in range(len(x)-1):
+                        v1 = z_idx * len(x) + i + 1
+                        v2 = v1 + 1
+                        v3 = v2 + len(x)
+                        v4 = v1 + len(x)
+                        # Split rectangle into two triangles with texture coordinates
+                        f.write(f"f {v1}/{v1} {v2}/{v2} {v3}/{v3}\n")  # First triangle
+                        f.write(f"f {v1}/{v1} {v3}/{v3} {v4}/{v4}\n")  # Second triangle
+
+            
+            
+            
 
     def reparameterizeActiveFragment(self):
         pv = self.project_view
@@ -3469,3 +3547,135 @@ class DeleteActiveVolumeButton(QPushButton):
 
     def onButtonClicked(self):
         self.main_window.deleteActiveVolume()
+
+class SwissRollDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Create Swiss Roll Fragment")
+        self.resize(600, 400) # Make dialog bigger
+        
+        layout = QVBoxLayout()
+        layout.setSpacing(20) # Add more vertical spacing between sections
+        
+        # Position controls
+        pos_layout = QHBoxLayout()
+        pos_layout.addWidget(QLabel("X Location:"))
+        self.x_loc = QSpinBox()
+        self.x_loc.setRange(0, 100000)
+        self.x_loc.setValue(3000)
+        self.x_loc.setMinimumWidth(100) # Make spinboxes wider
+        pos_layout.addWidget(self.x_loc)
+        pos_layout.addWidget(QLabel("Y Location:"))
+        self.y_loc = QSpinBox()
+        self.y_loc.setRange(0, 100000)
+        self.y_loc.setValue(3000)
+        self.y_loc.setMinimumWidth(100)
+        pos_layout.addWidget(self.y_loc)
+        layout.addLayout(pos_layout)
+        
+        # Z range
+        z_layout = QHBoxLayout()
+        z_layout.addWidget(QLabel("Z Min:"))
+        self.z_min = QSpinBox()
+        self.z_min.setRange(0, 1000000)
+        self.z_min.setValue(0)
+        self.z_min.setMinimumWidth(100)
+        z_layout.addWidget(self.z_min)
+        z_layout.addWidget(QLabel("Z Max:"))
+        self.z_max = QSpinBox()
+        self.z_max.setRange(0, 1000000)
+        self.z_max.setValue(1000)
+        self.z_max.setMinimumWidth(100)
+        z_layout.addWidget(self.z_max)
+        layout.addLayout(z_layout)
+
+        # Roll parameters
+        params_layout = QHBoxLayout()
+        
+        # Number of wraps
+        params_layout.addWidget(QLabel("Number of Wraps:"))
+        self.wraps = QDoubleSpinBox()
+        self.wraps.setRange(0.1, 10000.0)
+        self.wraps.setValue(5)
+        self.wraps.setSingleStep(0.1)
+        self.wraps.setMinimumWidth(100)
+        params_layout.addWidget(self.wraps)
+        
+        # Total width
+        params_layout.addWidget(QLabel("Total Width:"))
+        self.total_width = QDoubleSpinBox()
+        self.total_width.setRange(1.0, 100000.0)
+        self.total_width.setValue(400.0)
+        self.total_width.setSingleStep(1.0)
+        self.total_width.setMinimumWidth(100)
+        params_layout.addWidget(self.total_width)
+        layout.addLayout(params_layout)
+
+        # Points parameters
+        points_layout = QHBoxLayout()
+        
+        # XY plane points
+        points_layout.addWidget(QLabel("XY Plane Points:"))
+        self.xy_points = QSpinBox()
+        self.xy_points.setRange(10, 10000000)
+        self.xy_points.setValue(100)
+        self.xy_points.valueChanged.connect(self.updateTotalPoints)
+        self.xy_points.setMinimumWidth(100)
+        points_layout.addWidget(self.xy_points)
+        
+        # Z steps
+        points_layout.addWidget(QLabel("Z Step:"))
+        self.z_step = QSpinBox()
+        self.z_step.setRange(2, 10000)
+        self.z_step.setValue(20)
+        self.z_step.valueChanged.connect(self.updateTotalPoints)
+        self.z_step.setMinimumWidth(100)
+        points_layout.addWidget(self.z_step)
+        layout.addLayout(points_layout)
+
+        # Total points display
+        total_points_layout = QHBoxLayout()
+        total_points_layout.addWidget(QLabel("Total Points:"))
+        self.total_points_label = QLabel("2000")  # Default value
+        self.total_points_label.setMinimumWidth(100)
+        total_points_layout.addWidget(self.total_points_label)
+        layout.addLayout(total_points_layout)
+        self.updateTotalPoints()  # Initialize total points display
+
+        # Buttons
+        buttons = QHBoxLayout()
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(self.accept)
+        ok_button.setMinimumWidth(100)
+        cancel_button = QPushButton("Cancel") 
+        cancel_button.clicked.connect(self.reject)
+        cancel_button.setMinimumWidth(100)
+        buttons.addWidget(ok_button)
+        buttons.addWidget(cancel_button)
+        layout.addLayout(buttons)
+        
+        # Add some padding around the edges
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        self.setLayout(layout)
+    
+    def updateTotalPoints(self):
+        total = self.xy_points.value() * (self.z_max.value() - self.z_min.value()) / self.z_step.value()
+        self.total_points_label.setText(str(total))
+    
+    def getValues(self):
+        return {
+            'x_loc': self.x_loc.value(),
+            'y_loc': self.y_loc.value(),
+            'z_min': self.z_min.value(),
+            'z_max': self.z_max.value(),
+            'wraps': self.wraps.value(),
+            'total_width': self.total_width.value(),
+            'z_step': self.z_step.value(),
+            'xy_points': self.xy_points.value()
+        }
+
+# # Add to MainWindow.__init__ where other buttons are created
+# self.create_swiss_roll = QPushButton("New Swiss Roll")
+# self.create_swiss_roll.clicked.connect(self.createSwissRollFragment)
+# # Add button to layout where other fragment buttons are

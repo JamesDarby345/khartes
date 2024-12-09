@@ -968,11 +968,11 @@ class DataWindow(QLabel):
     def wheelEvent(self, event):
         if self.volume_view is None:
             return
-        print("wheelEvent", event.angleDelta().y(), event.pixelDelta(), self.localNearbyNodeIndex)
+        # print("wheelEvent", event.angleDelta().y(), event.pixelDelta(), self.localNearbyNodeIndex)
 
         # Get delta before any modifier checks
         delta = event.angleDelta().y()
-        print("delta", delta)
+        # print("delta", delta)
         
         modifiers = QApplication.queryKeyboardModifiers()
         use_neighbors = bool(modifiers & Qt.AltModifier)
@@ -991,7 +991,7 @@ class DataWindow(QLabel):
             return
 
         # Only run neighbor selection code if alt or ctrl pressed
-        print("wheelEvent nearby node selected")
+        # print("wheelEvent nearby node selected")
         pv = self.window.project_view
         if pv is None or pv.nearby_node_fv is None:
             return
