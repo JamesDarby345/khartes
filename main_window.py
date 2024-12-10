@@ -1952,8 +1952,41 @@ class MainWindow(QMainWindow):
                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
 
         if reply == QMessageBox.Yes:
+            # Find and delete the fragment's files from the project's fragments directory
+            # The files are named with the fragment's creation timestamp
+            timestamp = mf.created.replace('-','').replace('T','').replace(':','').replace('.','').replace('Z','')[:14]
+            print("timestamp", timestamp)
+            print("fragments_path", pv.project.fragments_path)
+            fragment_base = os.path.join(os.path.dirname(pv.project.fragments_path), pv.project.fragments_path.name, timestamp)
+            obj_file = fragment_base + '.obj'
+            mtl_file = fragment_base + '.mtl'
+            
+            # Comment out deleting fragments from previous versions for better recovery of files
+            # Also check for _prev and _prev_2 versions
+            # prev_base = os.path.join(os.path.dirname(pv.project.fragments_path), pv.project.fragments_path.name + "_prev", timestamp) 
+            # prev2_base = os.path.join(os.path.dirname(pv.project.fragments_path), pv.project.fragments_path.name + "_prev_2", timestamp)
+            # obj_prev = prev_base + '.obj'
+            # mtl_prev = prev_base + '.mtl'
+            # obj_prev2 = prev2_base + '.obj'
+            # mtl_prev2 = prev2_base + '.mtl'
+            
+            files_to_delete = [
+                obj_file, mtl_file,
+                # obj_prev, mtl_prev,
+                # obj_prev2, mtl_prev2
+            ]
+            print("files_to_delete", files_to_delete)
+            
+            for file_path in files_to_delete:
+                try:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                        print(f"Deleted fragment file: {file_path}")
+                except Exception as e:
+                    print(f"Warning: Failed to remove fragment file {file_path}: {e}")
+            # /Users/jamesdarby/Documents/VesuviusScroll/GP/khartes/khartes_project/overlay_testing.khprj/fragments/20241128120938.obj
+            # /Users/jamesdarby/Documents/VesuviusScroll/GP/khartes/khartes_project/overlay_testing.khprj/fragments/20241128120938.obj
             # Remove from project
-            self.fragments_table.model().beginResetModel()
             pv.project.removeFragment(mf)
             self.setFragments()
             self.fragments_table.model().endResetModel()
