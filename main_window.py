@@ -340,7 +340,7 @@ class CreateFragmentButton(QPushButton):
 
 class CreateSwissRollFragmentButton(QPushButton):
     def __init__(self, main_window, parent=None):
-        super(CreateSwissRollFragmentButton, self).__init__("Swiss Roll", parent)
+        super(CreateSwissRollFragmentButton, self).__init__("New Swiss Roll", parent)
         self.main_window = main_window
         self.clicked.connect(self.onButtonClicked)
 
@@ -1368,16 +1368,17 @@ class MainWindow(QMainWindow):
         label.setAlignment(Qt.AlignCenter)
         # hlayout.addWidget(label)
         create_frag = CreateFragmentButton(self)
-        create_swiss_roll_frag = CreateSwissRollFragmentButton(self)
-        # print("dark mode", self.isDarkMode())
         create_frag.setStyleSheet("QPushButton { %s; padding: 5; }"%self.highlightedBackgroundStyle())
-        create_swiss_roll_frag.setStyleSheet("QPushButton { %s; padding: 5; }"%self.highlightedBackgroundStyle())
         hlayout.addWidget(create_frag)
-        hlayout.addWidget(create_swiss_roll_frag)
 
-        create_25d_frag = Create25DFragmentButton(self)
-        create_25d_frag.setStyleSheet("QPushButton { %s; padding: 5; }"%self.highlightedBackgroundStyle())
-        hlayout.addWidget(create_25d_frag)
+
+        # create_25d_frag = Create25DFragmentButton(self)
+        # create_25d_frag.setStyleSheet("QPushButton { %s; padding: 5; }"%self.highlightedBackgroundStyle())
+        # hlayout.addWidget(create_25d_frag)
+
+        create_swiss_roll_frag = CreateSwissRollFragmentButton(self)
+        create_swiss_roll_frag.setStyleSheet("QPushButton { %s; padding: 5; }"%self.highlightedBackgroundStyle())
+        hlayout.addWidget(create_swiss_roll_frag)
 
         create_umbilicus_frag = CreateUmbilicusFragmentButton(self)
         create_umbilicus_frag.setStyleSheet("QPushButton { %s; padding: 5; }"%self.highlightedBackgroundStyle())
@@ -3768,10 +3769,10 @@ class SwissRollDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Create Swiss Roll Fragment")
-        self.resize(600, 400) # Make dialog bigger
+        self.resize(600, 400) 
         
         layout = QVBoxLayout()
-        layout.setSpacing(20) # Add more vertical spacing between sections
+        layout.setSpacing(20) # Add vertical spacing between sections
         
         # Position controls
         pos_layout = QHBoxLayout()
@@ -3779,7 +3780,7 @@ class SwissRollDialog(QDialog):
         self.x_loc = QSpinBox()
         self.x_loc.setRange(0, 100000)
         self.x_loc.setValue(3000)
-        self.x_loc.setMinimumWidth(100) # Make spinboxes wider
+        self.x_loc.setMinimumWidth(100)
         pos_layout.addWidget(self.x_loc)
         pos_layout.addWidget(QLabel("Y Location:"))
         self.y_loc = QSpinBox()
