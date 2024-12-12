@@ -766,7 +766,7 @@ class Project:
     def removeFragment(self, fragment):
         if fragment in self.fragments:
             print("removing fragment", fragment.name, fragment.created)
-            print(fragment)
+            # print(fragment)
             self.fragments.remove(fragment)
             for pv in self.project_views:
                 if fragment in pv.fragments:

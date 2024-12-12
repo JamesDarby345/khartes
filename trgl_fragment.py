@@ -24,6 +24,7 @@ class TrglFragment(BaseFragment):
         self.trgls = np.zeros((0,3), dtype=np.int32)
         self.direction = 0
         self.params = {}
+        self.type = BaseFragment.Type.TRGL_FRAGMENT
 
     # class function
     # expected to return a list of fragments, but always

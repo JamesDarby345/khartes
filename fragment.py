@@ -38,6 +38,7 @@ class FragmentsModel(QtCore.QAbstractTableModel):
             "Hide\nMesh",
             "Name",
             "Color",
+            "Type",  # Add new column
             "Dir",
             "Pts",
             "cm^2"
@@ -49,6 +50,7 @@ class FragmentsModel(QtCore.QAbstractTableModel):
             "Select which fragments have their mesh hidden;\nclick box to select",
             "Name of the fragment; click to edit",
             "Color of the fragment; click to edit",
+            "Type of fragment (2.5D or 3D)",  # Add new tooltip
             "Direction (orientation) of the fragment",
             "Number of points currently in fragment",
             "Fragment area in square centimeters"
@@ -178,6 +180,8 @@ class FragmentsModel(QtCore.QAbstractTableModel):
             return len(fragment.gpoints)
         elif column == self.columnIndex("cm^2"):
             return "%.4f"%fragment_view.sqcm
+        elif column == self.columnIndex("Type"):
+            return fragment.getType()
         else:
             return None
 
@@ -247,6 +251,7 @@ class Fragment(BaseFragment):
 
         # History of gpoints, for undo functionality
         self.gpoints_history : LifoQueue = LifoQueue(100)
+        self.type = BaseFragment.Type.FRAGMENT
 
     def createView(self, project_view):
         return FragmentView(project_view, self)
@@ -1744,6 +1749,8 @@ class FragmentView(BaseFragmentView):
     # stxy is ignored
     def addPoint(self, tijk, stxy):
         # ijk using volume-view's direction
+        if tijk is None: # picked point is outside of current fragment
+            return
         fijk = self.vijkToFijk(tijk)
 
         # use fijk rounded to nearest integer (note that this
@@ -1799,7 +1806,8 @@ class FragmentView(BaseFragmentView):
 
     def trgls(self):
         if self.tri is None:
-            return None
+            # Return empty array instead of None for new fragments
+            return np.zeros((0,3), dtype=np.int32)
         return self.tri.simplices
 
     # return True if succeeds, False if fails
@@ -1835,3 +1843,5 @@ class FragmentView(BaseFragmentView):
             self.fragment.gpoints = self.fragment.gpoints_history.get()
             self.fragment.notifyModified()
             self.setLocalPoints(True, False)
+
+

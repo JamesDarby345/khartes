@@ -12,6 +12,7 @@ from trgl_fragment import TrglFragmentView
 from utils import Utils
 from project import ProjectView
 from st import ST
+from uv_mapper import UVMapper
 # import PIL
 # import PIL.Image
 
@@ -1162,7 +1163,7 @@ class DataWindow(QLabel):
                     nij[2] -= d[2]
                     self.setWaitCursor()
                     self.setNearbyNodeIjk(nij, True, not alt_pressed)
-        elif not self.isMovingNode and (key == Qt.Key_Backspace or key == Qt.Key_Delete):
+        elif not self.isMovingNode and (key == Qt.Key_5 or key == Qt.Key_Delete):
             # print("backspace/delete")
             # ijk = self.getNearbyNodeIjk()
             # if ijk is None:
@@ -1215,7 +1216,7 @@ class DataWindow(QLabel):
             xy = self.ijToXy(ij)
             gxy = self.mapToGlobal(QPoint(*xy))
             QCursor.setPos(gxy)
-        elif self.inAddNodeMode() and not self.isMovingNode and self.axis in (0,1) and key in (Qt.Key_BracketLeft, Qt.Key_BracketRight, Qt.Key_BraceLeft, Qt.Key_BraceRight):
+        elif self.inAddNodeMode() and not self.isMovingNode and self.axis in (0, 1) and key in (Qt.Key_3, Qt.Key_4):
             self.setWaitCursor()
             ijk = self.getNearbyNodeIjk()
             if ijk is None:
@@ -1225,7 +1226,7 @@ class DataWindow(QLabel):
             else:
                 ij = ijk[:2]
             sign = 1
-            if key in (Qt.Key_BracketLeft, Qt.Key_BraceLeft):
+            if key == Qt.Key_3:
                 sign = -1
             # self.window.drawSlices()
             self.autoExtrapolate(sign, ij)
@@ -1260,6 +1261,12 @@ class DataWindow(QLabel):
             self.isPanning = False
             self.isMovingNode = False
             self.isMovingTiff = False
+        elif key in (Qt.Key_QuoteLeft, Qt.Key_AsciiTilde):
+            current_frag = self.currentFragmentView()
+            if current_frag is not None:
+                self.setWaitCursor()
+                current_frag.reparameterize()
+                self.window.drawSlices()
         self.setStatusTextFromMousePosition()
         self.checkCursor()
 
@@ -1451,8 +1458,11 @@ class DataWindow(QLabel):
         self.setNearbyTiffAndNode(mxy)
         self.window.drawSlices()
 
-
-    def autoExtrapolate(self, sign, ij):
+    
+    def autoExtrapolateOld(self, sign, ij):
+        """
+        Old autoextrapolate fn based on st.py and running on the raw volume data. 
+        """
         volume = self.volume_view
         if volume is None :
             return
@@ -1546,6 +1556,147 @@ class DataWindow(QLabel):
             tijk = self.ijToTijk(pt)
             # print("adding point at",tijk)
             self.window.addPointToCurrentFragment(tijk)
+        self.window.setLiveZsurfUpdate(zsurf_update)
+        mpt = self.mapFromGlobal(QCursor.pos())
+        mxy = (mpt.x(), mpt.y())
+        self.setNearbyTiffAndNode(mxy)
+        self.window.drawSlices()
+
+
+    def autoExtrapolate(self, sign, ij):
+        if self.localNearbyNodeIndex < 0:
+            print("No node selected")
+            return
+                
+        volume = self.volume_view
+        if volume is None:
+            return
+        current_frag = self.currentFragmentView()
+        if current_frag is None:
+            return
+
+        # Get viewing window dimensions with margins
+        ww = self.size().width()
+        wh = self.size().height()
+        margin = 15  # Pixels from edge to avoid
+        safe_window_ij0 = self.xyToIj((margin, margin))
+        safe_window_ij1 = self.xyToIj((ww-margin, wh-margin))
+
+        # Get slice bounds and data
+        zarr_max_width = self.getZarrMaxWidth()
+        rs = volume.getSliceBounds(self.axis, volume.ijktf, zarr_max_width)
+        if rs is None:
+            return
+                    
+        (sx1,sy1),(sx2,sy2) = rs
+        slc = volume.getSliceInRange(
+                volume.trdata, slice(sx1,sx2), slice(sy1,sy2), 
+                volume.ijktf[self.axis], self.axis)
+        
+        # Calculate ROI bounds
+        roi_x1 = max(0, int(safe_window_ij0[0] - sx1))
+        roi_x2 = min(slc.shape[1], int(safe_window_ij1[0] - sx1))
+        roi_y1 = max(0, int(safe_window_ij0[1] - sy1))
+        roi_y2 = min(slc.shape[0], int(safe_window_ij1[1] - sy1))
+
+        if roi_x2 <= roi_x1 or roi_y2 <= roi_y1:
+            print("Invalid ROI bounds")
+            return
+
+        # Extract region of interest
+        roi = slc[roi_y1:roi_y2, roi_x1:roi_x2]
+
+        # Get clicked node info
+        node_pos = self.cur_frag_pts_xyijk[self.localNearbyNodeIndex, 2:5]
+        node_x_in_roi = int(node_pos[self.iIndex] - sx1 - roi_x1)
+        node_y_in_roi = int(node_pos[self.jIndex] - sy1 - roi_y1)
+
+        # Find connected components
+        binary_roi = (roi > 32768).astype(np.uint8)
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
+            binary_roi, connectivity=8)
+        
+        target_label = labels[node_y_in_roi, node_x_in_roi]
+        if target_label == 0:
+            return
+            
+        # Get component mask and contour
+        component_mask = (labels == target_label)
+        contours, _ = cv2.findContours(component_mask.astype(np.uint8), 
+                                    cv2.RETR_EXTERNAL, 
+                                    cv2.CHAIN_APPROX_NONE)
+        if not contours:
+            return
+        
+        contour = max(contours, key=cv2.contourArea)
+        points = contour.squeeze()
+        
+        if len(points.shape) < 2:
+            return
+        
+        # Filter points based on direction
+        if sign > 0:  # right bracket ]
+            points = points[points[:,0] > node_x_in_roi]
+            end_x = roi_x2 - roi_x1
+        else:  # left bracket [
+            points = points[points[:,0] < node_x_in_roi]
+            end_x = 0
+        
+        if len(points) == 0:
+            return
+
+        # Define point spacing and selection
+        spacing = 25
+        selected_points = []
+        window = 5  # Window for averaging y coordinates
+        last_point = np.array([node_x_in_roi, node_y_in_roi])
+        
+        # Create evenly spaced points
+        x_coords = np.linspace(node_x_in_roi, end_x, max(2, int(abs(end_x - node_x_in_roi) / spacing)))
+        
+        zsurf_update = self.window.live_zsurf_update
+        self.window.setLiveZsurfUpdate(False)
+
+        # Add points along the contour at regular intervals
+        spacing = 25
+        selected_points = []
+        window = 5  # Window for averaging y coordinates
+        last_point = np.array([node_x_in_roi, node_y_in_roi])
+        
+        x_coords = np.linspace(node_x_in_roi, end_x, max(2, int(abs(end_x - node_x_in_roi) / spacing)))
+        
+        for i, x in enumerate(x_coords):
+            try:
+                # Skip the first point since it would overlap with existing node
+                if i == 0:
+                    continue
+                    
+                nearby = points[np.abs(points[:,0] - x) < window]
+                if len(nearby) == 0:
+                    continue
+                        
+                y = np.mean(nearby[:,1])
+                new_point = np.array([x, y])
+                
+                if len(selected_points) > 0:
+                    # Skip if too close to previous point
+                    if np.linalg.norm(new_point - last_point) < 10:
+                        continue
+                            
+                # Convert ROI coordinates back to global coordinates
+                global_x = new_point[0] + roi_x1 + sx1
+                global_y = new_point[1] + roi_y1 + sy1
+                tijk = tuple(self.ijToTijk((global_x, global_y)))
+
+                # Add point the same way a user would - just pass tijk
+                self.addPoint(tijk)
+                last_point = new_point
+                selected_points.append(new_point)
+
+            except (IndexError, ValueError) as e:
+                print(f"Warning: Skipping point due to mesh update: {str(e)}")
+                continue
+
         self.window.setLiveZsurfUpdate(zsurf_update)
         mpt = self.mapFromGlobal(QCursor.pos())
         mxy = (mpt.x(), mpt.y())

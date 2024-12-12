@@ -375,6 +375,8 @@ class GLDataWindow(DataWindow):
             mfvi = indexed_fvs.index(mfv)
         if mfvi < 0:
             return None
+        if mfv.fragment.getType() == "U":
+            return None
         # indexes of rows where fragment_view matches mfvi
         # matches = (xyfvs[:,2] == mfvi).nonzero()[0]
 

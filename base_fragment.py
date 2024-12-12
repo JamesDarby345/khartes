@@ -2,9 +2,15 @@ import time
 from utils import Utils
 import numpy as np
 from scipy.spatial import KDTree
+from enum import Enum
 from PyQt5.QtGui import QColor
 
 class BaseFragment:
+    class Type(Enum):
+        TRGL_FRAGMENT = "3D"
+        FRAGMENT = "2.5D" 
+        UMBILICUS = "U"
+
     def __init__(self, name):
         self.name = name
         self.color = QColor()
@@ -13,6 +19,7 @@ class BaseFragment:
         self.modified = Utils.timestamp()
         self.valid = False
         self.project = None
+        self.type = None
 
     def notifyModified(self, tstamp=""):
         if tstamp == "":
@@ -215,8 +222,12 @@ class BaseFragment:
         bvec = (trgls[:,0] == pt_index) | (trgls[:,1] == pt_index) | (trgls[:,2] == pt_index)
         tindexes = np.where(bvec)[0]
         return tindexes.tolist()
+    
+    def getType(self):
+        return self.type.value if self.type else None
 
 class BaseFragmentView:
+
     def __init__(self, project_view, fragment):
         self.project_view = project_view
         self.fragment = fragment

@@ -1068,7 +1068,7 @@ class GLSurfaceWindowChild(GLDataWindowChild):
 
         pv = dw.window.project_view
         mfv = self.active_fragment
-        if mfv is None:
+        if mfv is None or mfv.fragment.getType() == "U":
             # print("No fragment visible")
             return
 
