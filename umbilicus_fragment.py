@@ -248,7 +248,7 @@ class UmbilicusFragmentView(FragmentView):
 
     def setLocalPoints(self, do_update=True, notify=True):
         """Override to handle manual and interpolated points"""
-        super(UmbilicusFragmentView, self).setLocalPoints(do_update, notify)
+        super(UmbilicusFragmentView, self).setLocalPoints(do_update, notify, build_kdtrees=False)
         
         # Initialize manual points from gpoints if not already set
         if self.manual_points is None and len(self.fragment.gpoints) > 0:

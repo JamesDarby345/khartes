@@ -1371,10 +1371,9 @@ class MainWindow(QMainWindow):
         create_frag.setStyleSheet("QPushButton { %s; padding: 5; }"%self.highlightedBackgroundStyle())
         hlayout.addWidget(create_frag)
 
-
-        # create_25d_frag = Create25DFragmentButton(self)
-        # create_25d_frag.setStyleSheet("QPushButton { %s; padding: 5; }"%self.highlightedBackgroundStyle())
-        # hlayout.addWidget(create_25d_frag)
+        create_25d_frag = Create25DFragmentButton(self)
+        create_25d_frag.setStyleSheet("QPushButton { %s; padding: 5; }"%self.highlightedBackgroundStyle())
+        hlayout.addWidget(create_25d_frag)
 
         create_swiss_roll_frag = CreateSwissRollFragmentButton(self)
         create_swiss_roll_frag.setStyleSheet("QPushButton { %s; padding: 5; }"%self.highlightedBackgroundStyle())
@@ -2236,6 +2235,7 @@ class MainWindow(QMainWindow):
             return
 
         dialog = SwissRollDialog(self)
+        dialog.setActiveFragment(self.project_view.mainActiveFragmentView())
         if dialog.exec_() == QDialog.Accepted:
             values = dialog.getValues()
             z_max = values['z_max']
@@ -3776,12 +3776,19 @@ class SwissRollDialog(QDialog):
         
         # Position controls
         pos_layout = QHBoxLayout()
+        
+        # Add checkbox for using umbilicus position
+        self.use_umbilicus = QCheckBox("Use Umbilicus Position")
+        self.use_umbilicus.setEnabled(False)  # Disabled by default
+        pos_layout.addWidget(self.use_umbilicus)
+        
         pos_layout.addWidget(QLabel("X Location:"))
         self.x_loc = QSpinBox()
         self.x_loc.setRange(0, 100000)
         self.x_loc.setValue(3000)
         self.x_loc.setMinimumWidth(100)
         pos_layout.addWidget(self.x_loc)
+        
         pos_layout.addWidget(QLabel("Y Location:"))
         self.y_loc = QSpinBox()
         self.y_loc.setRange(0, 100000)
@@ -3789,6 +3796,9 @@ class SwissRollDialog(QDialog):
         self.y_loc.setMinimumWidth(100)
         pos_layout.addWidget(self.y_loc)
         layout.addLayout(pos_layout)
+        
+        # Connect checkbox to handler
+        self.use_umbilicus.stateChanged.connect(self.onUseUmbilicusChanged)
         
         # Z range
         z_layout = QHBoxLayout()
@@ -3891,6 +3901,32 @@ class SwissRollDialog(QDialog):
             'z_step': self.z_step.value(),
             'xy_points': self.xy_points.value()
         }
+        
+    def setActiveFragment(self, fragment_view):
+        """Enable/disable umbilicus checkbox based on active fragment"""
+        if fragment_view and hasattr(fragment_view, 'fragment') and hasattr(fragment_view.fragment, 'is_umbilicus'):
+            self.use_umbilicus.setEnabled(True)
+            if self.use_umbilicus.isChecked():
+                self.updateFromUmbilicus(fragment_view)
+        else:
+            self.use_umbilicus.setEnabled(False)
+            self.use_umbilicus.setChecked(False)
+            
+    def onUseUmbilicusChanged(self, state):
+        """Handle umbilicus checkbox state changes"""
+        if state == Qt.Checked:
+            main_window = self.parent()
+            active_fragment = main_window.project_view.mainActiveFragmentView()
+            if active_fragment:
+                self.updateFromUmbilicus(active_fragment)
+                
+    def updateFromUmbilicus(self, fragment_view):
+        """Update X/Y location from umbilicus first point"""
+        if fragment_view.manual_points is not None and len(fragment_view.manual_points) > 0:
+            # Get first point (lowest Z)
+            first_point = fragment_view.manual_points[0]
+            self.x_loc.setValue(int(first_point[0]))
+            self.y_loc.setValue(int(first_point[1]))
 
 # # Add to MainWindow.__init__ where other buttons are created
 # self.create_swiss_roll = QPushButton("New Swiss Roll")

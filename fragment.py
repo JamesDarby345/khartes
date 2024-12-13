@@ -271,6 +271,7 @@ class Fragment(BaseFragment):
         info['direction'] = self.direction
         info['color'] = self.color.name()
         info['params'] = self.params
+        info['type'] = self.type.value if self.type else Fragment.Type.FRAGMENT.value  # Save fragment type
         info['gpoints'] = self.gpoints.tolist()
         if self.params.get('echo', '') != '':
             info['gpoints'] = []
@@ -318,13 +319,18 @@ class Fragment(BaseFragment):
         name = info['name']
         direction = info['direction']
         gpoints = info['gpoints']
-        frag = Fragment(name, direction)
+        
+        # Create correct fragment type based on saved type
+        frag_type = info.get('type', BaseFragment.Type.FRAGMENT.value)
+        if frag_type == BaseFragment.Type.UMBILICUS.value:
+            from umbilicus_fragment import UmbilicusFragment
+            frag = UmbilicusFragment(name, direction)
+        else:
+            frag = Fragment(name, direction)
+            
         frag.setColor(color, no_notify=True)
         frag.valid = True
-        # if len(name) > 0 and name[-1] == "∴":
-        #     frag.no_mesh = True
         if len(gpoints) > 0:
-            # frag.gpoints = np.array(gpoints, dtype=np.int32)
             frag.gpoints = np.array(gpoints, dtype=np.float32)
         if 'params' in info:
             frag.params = info['params']
@@ -333,8 +339,6 @@ class Fragment(BaseFragment):
         if 'created' in info:
             frag.created = info['created']
         else:
-            # old file without "created" timestamp
-            # sleeping to make sure timestamp is unique
             time.sleep(.1)
             frag.created = Utils.timestamp()
         if 'modified' in info:
@@ -1007,7 +1011,7 @@ class FragmentView(BaseFragmentView):
     # fragment views have had their current volume view set.
     # NOTE that Fragment.setLocalPoints sets stpoints,
     # but TrglFragment.setLocalPoints does not.
-    def setLocalPoints(self, recursion_ok, always_update_zsurf=True):
+    def setLocalPoints(self, recursion_ok, always_update_zsurf=True, build_kdtrees=True):
         # print("set local points", self.cur_volume_view.volume.name)
         # print("set local points", self.fragment.name)
         self.local_points_modified = Utils.timestamp()
@@ -1065,7 +1069,8 @@ class FragmentView(BaseFragmentView):
             ntrgl = len(self.tri.simplices)
         self.working_trgls = np.full((ntrgl,),True)
         # print("calculated sq cm")
-        super().buildKDTrees(recursion_ok)
+        if build_kdtrees:
+            super().buildKDTrees(recursion_ok)
         if not recursion_ok:
             return
         for fv in self.project_view.fragments.values():
