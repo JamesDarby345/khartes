@@ -1,14 +1,18 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox, QDoubleSpinBox,
-    QPushButton, QCheckBox
+    QPushButton, QCheckBox, QComboBox
 )
 from PyQt5.QtCore import Qt
 import numpy as np
 import time
 import os
 
-def create_swiss_roll_obj(values, umbilicus_points=None, timestamp=None):
-    """Create a swiss roll OBJ file based on the given parameters"""
+import os
+import time
+import numpy as np
+
+def create_swiss_roll_obj(values, umbilicus_points=None, direction_extents=None, timestamp=None):
+    """Create a swiss roll OBJ file with direction-based radial constraints."""
     if timestamp is None:
         timestamp = time.strftime("%Y%m%d_%H:%M:%S", time.gmtime())
         
@@ -24,8 +28,13 @@ def create_swiss_roll_obj(values, umbilicus_points=None, timestamp=None):
     x_loc = values['x_loc']
     y_loc = values['y_loc']
     wraps = values['wraps']
-    total_width = values['total_width']
+    # direction_extents is a list of radial distances (e.g. [r0, r1, r2, ..., rN-1])
     use_umbilicus = values.get('use_umbilicus', False)
+
+    # Number of directional constraints
+    N = len(direction_extents)
+    # The full angle corresponding to the final wrap
+    final_t = wraps * 2 * np.pi
 
     # Create z points
     z_points = np.linspace(z_min, z_max, int((z_max - z_min) / z_step))
@@ -46,38 +55,63 @@ def create_swiss_roll_obj(values, umbilicus_points=None, timestamp=None):
         x_positions = np.full_like(z_points, x_loc)
         y_positions = np.full_like(z_points, y_loc)
 
-    # Write points and faces to OBJ file
+    # Get direction multiplier (-1 for CCW, 1 for CW)
+    direction = values.get('direction', 1)
+    
     with open(filename, 'w') as f:
         f.write("# Swiss Roll OBJ File\n")
         
         # For each z level
         for z_idx, z in enumerate(z_points):
-            # Create swiss roll points at this z level
-            t = np.linspace(0, wraps * 2 * np.pi, xy_points)
-            radius = total_width / (2 * wraps * 2 * np.pi)
-            x = x_positions[z_idx] + radius * t * np.cos(t)
-            y = y_positions[z_idx] + radius * t * np.sin(t)
+            # Parameter t goes from 0 to final_t for xy_points samples
+            t_values = np.linspace(0, wraps * 2 * np.pi, xy_points)
             
-            # Write vertices and texture coordinates
-            for i in range(len(x)):
+            for t in t_values:
+                # Compute normalized layer fraction (0 at center, 1 at outer boundary)
+                u = t / final_t
+
+                # Current angle on [0,2π)
+                angle = t % (2*np.pi)
+
+                # Determine which segment of direction_extents we're in
+                # segment index scaled by angle/2π * N
+                segment_float = (angle / (2*np.pi)) * N
+                k = int(np.floor(segment_float))
+                w = segment_float - k  # interpolation weight
+
+                # Wrap indices (in case angle is near 2π)
+                d0 = direction_extents[k % N]
+                d1 = direction_extents[(k+1) % N]
+
+                # Interpolated max radius for this angle
+                R_max = (1 - w) * d0 + w * d1
+
+                # Actual radius at this point
+                actual_radius = u * R_max
+
+                # Compute coordinates - multiply by direction for CW/CCW
+                x = x_positions[z_idx] + actual_radius * np.cos(direction * t)
+                y = y_positions[z_idx] + actual_radius * np.sin(direction * t)
+
                 # Write vertex
-                f.write(f"v {x[i]} {y[i]} {z}\n")
-                # Write texture coordinates - normalize t to [0,1] and z to [0,1]
-                u = t[i] / (wraps * 2 * np.pi)  # Normalize t parameter
-                v = (z - z_min) / (z_max - z_min)  # Normalize z coordinate
-                f.write(f"vt {u} {v}\n")
+                f.write(f"v {x} {y} {z}\n")
+
+                # Write texture coordinates - similar normalization
+                v_normalized = (z - z_min) / (z_max - z_min)  # z -> [0,1]
+                u_normalized = u  # radius fraction as texture u-coordinate
+                f.write(f"vt {u_normalized} {v_normalized}\n")
         
-        # Write faces as triangles with texture coordinates
+        # Write faces as before
         for z_idx in range(len(z_points)-1):
             for i in range(xy_points-1):
                 v1 = z_idx * xy_points + i + 1
                 v2 = v1 + 1
                 v3 = v2 + xy_points
                 v4 = v1 + xy_points
-                # Split rectangle into two triangles with texture coordinates
-                f.write(f"f {v1}/{v1} {v2}/{v2} {v3}/{v3}\n")  # First triangle
-                f.write(f"f {v1}/{v1} {v3}/{v3} {v4}/{v4}\n")  # Second triangle
-                
+                # Two triangles per quad
+                f.write(f"f {v1}/{v1} {v2}/{v2} {v3}/{v3}\n")
+                f.write(f"f {v1}/{v1} {v3}/{v3} {v4}/{v4}\n")
+
     return filename
 
 class SwissRollDialog(QDialog):
@@ -151,6 +185,13 @@ class SwissRollDialog(QDialog):
         self.wraps.setMinimumWidth(100)
         params_layout.addWidget(self.wraps)
         
+        # Direction (clockwise/counterclockwise)
+        params_layout.addWidget(QLabel("Direction:"))
+        self.direction = QComboBox()
+        self.direction.addItems(["Clockwise", "Counter-clockwise"])
+        self.direction.setCurrentIndex(0)
+        params_layout.addWidget(self.direction)
+        
         # Total width
         params_layout.addWidget(QLabel("Total Width:"))
         self.total_width = QDoubleSpinBox()
@@ -223,7 +264,8 @@ class SwissRollDialog(QDialog):
             'total_width': self.total_width.value(),
             'z_step': self.z_step.value(),
             'xy_points': self.xy_points.value(),
-            'use_umbilicus': self.use_umbilicus.isChecked()
+            'use_umbilicus': self.use_umbilicus.isChecked(),
+            'direction': -1 if self.direction.currentText() == "Counter-clockwise" else 1
         }
         
     def setActiveFragment(self, fragment_view):

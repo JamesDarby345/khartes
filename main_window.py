@@ -2243,7 +2243,8 @@ class MainWindow(QMainWindow):
         dialog.setActiveFragment(self.project_view.mainActiveFragmentView())
         if dialog.exec_() == QDialog.Accepted:
             values = dialog.getValues()
-            filename = create_swiss_roll_obj(values, umbilicus_points=dialog.getUmbilicusPoints())
+            directional_extents = [3000, 2000, 3000, 2000]
+            filename = create_swiss_roll_obj(values, dialog.getUmbilicusPoints(), directional_extents)
             self.loadObjFile(filename)
 
     def reparameterizeActiveFragment(self):
