@@ -6,10 +6,73 @@ from PyQt5.QtCore import Qt
 import numpy as np
 import time
 import os
+from math import cos, sin, pi
 
-import os
-import time
-import numpy as np
+def calculate_direction_extents(volume_view, z_point, num_directions=8):
+    """Calculate radial extents in different directions based on volume mask
+    
+    Args:
+        volume_view: The volume view containing the mask data
+        z_point: (x,y,z) coordinates of the center point
+        num_directions: Number of radial directions to sample (default 8)
+    """
+    # Get x,y slice at z_point
+    z = int(z_point[2])
+    x = int(z_point[0])
+    y = int(z_point[1])
+    
+    # Use the lowest resolution level available
+    if hasattr(volume_view.volume, 'levels') and len(volume_view.volume.levels) > 0:
+        lowest_res_level = volume_view.volume.levels[-1]  # Last level = lowest resolution
+        scale = lowest_res_level.scale
+        
+        # Scale coordinates to match resolution level
+        scaled_z = int(z / scale)
+        scaled_x = int(x / scale)
+        scaled_y = int(y / scale)
+        
+        # For Zarr volumes, directly access the data array
+        if hasattr(lowest_res_level, 'data'):
+            slice_data = lowest_res_level.data[scaled_z, :, :]  # Get xy slice
+        else:
+            return None
+            
+        if slice_data is None:
+            return None
+            
+        h, w = slice_data.shape
+        
+        # Calculate extents in num_directions evenly spaced angles
+        extents = []
+        for i in range(num_directions):
+            angle = 2 * pi * i / num_directions
+            dx, dy = cos(angle), sin(angle)
+            
+            # Follow ray until hitting 3x3 area of black pixels or edge
+            extent = 0
+            cx, cy = scaled_x, scaled_y
+            while True:
+                cx += dx
+                cy += dy
+                px, py = int(cx), int(cy)
+                
+                # Check bounds with 1 pixel padding for 3x3 check
+                if px < 1 or px >= w-1 or py < 1 or py >= h-1:
+                    break
+                    
+                # Check if 3x3 area around pixel is all black
+                area = slice_data[py-1:py+2, px-1:px+2]
+                if np.all(area == 0):
+                    break
+                    
+                extent += 1
+                
+            # Scale extent back to original resolution
+            extents.append(extent * scale)
+            
+        return extents
+        
+    return None
 
 def create_swiss_roll_obj(values, umbilicus_points=None, direction_extents=None, timestamp=None):
     """Create a swiss roll OBJ file with direction-based radial constraints."""
@@ -28,11 +91,13 @@ def create_swiss_roll_obj(values, umbilicus_points=None, direction_extents=None,
     x_loc = values['x_loc']
     y_loc = values['y_loc']
     wraps = values['wraps']
-    # direction_extents is a list of radial distances (e.g. [r0, r1, r2, ..., rN-1])
     use_umbilicus = values.get('use_umbilicus', False)
+    use_mask = values.get('use_mask', False)
+    num_directions = values.get('num_directions', 8)
+    volume_view = values.get('volume_view', None)
 
     # Number of directional constraints
-    N = len(direction_extents)
+    N = num_directions  # Number of directions to sample
     # The full angle corresponding to the final wrap
     final_t = wraps * 2 * np.pi
 
@@ -63,6 +128,15 @@ def create_swiss_roll_obj(values, umbilicus_points=None, direction_extents=None,
         
         # For each z level
         for z_idx, z in enumerate(z_points):
+            # Get direction extents for this z level if using mask
+            if use_mask and volume_view is not None:
+                z_direction_extents = calculate_direction_extents(volume_view, 
+                    (x_positions[z_idx], y_positions[z_idx], z), num_directions)
+                if z_direction_extents is None:
+                    z_direction_extents = direction_extents
+            else:
+                z_direction_extents = direction_extents
+                
             # Parameter t goes from 0 to final_t for xy_points samples
             t_values = np.linspace(0, wraps * 2 * np.pi, xy_points)
             
@@ -72,6 +146,8 @@ def create_swiss_roll_obj(values, umbilicus_points=None, direction_extents=None,
 
                 # Current angle on [0,2π)
                 angle = t % (2*np.pi)
+                if direction < 0:  # CCW case
+                    angle = (2*np.pi - angle) % (2*np.pi)  # Reverse angle for CCW
 
                 # Determine which segment of direction_extents we're in
                 # segment index scaled by angle/2π * N
@@ -80,8 +156,8 @@ def create_swiss_roll_obj(values, umbilicus_points=None, direction_extents=None,
                 w = segment_float - k  # interpolation weight
 
                 # Wrap indices (in case angle is near 2π)
-                d0 = direction_extents[k % N]
-                d1 = direction_extents[(k+1) % N]
+                d0 = z_direction_extents[k % N]
+                d1 = z_direction_extents[(k+1) % N]
 
                 # Interpolated max radius for this angle
                 R_max = (1 - w) * d0 + w * d1
@@ -119,6 +195,7 @@ class SwissRollDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Create Swiss Roll Fragment")
         self.resize(600, 400)
+        self.volume_view = volume_view
         
         layout = QVBoxLayout()
         layout.setSpacing(20) # Add vertical spacing between sections
@@ -136,8 +213,13 @@ class SwissRollDialog(QDialog):
         
         # Add checkbox for using umbilicus position
         self.use_umbilicus = QCheckBox("Use Umbilicus Position")
-        self.use_umbilicus.setEnabled(False)  # Disabled by default
+        self.use_umbilicus.setEnabled(False)  # Enabled by default
         pos_layout.addWidget(self.use_umbilicus)
+        
+        # Add checkbox for using mask constraint
+        self.use_mask = QCheckBox("Use Mask Constraint")
+        self.use_mask.setEnabled(volume_view is not None)
+        pos_layout.addWidget(self.use_mask)
         
         pos_layout.addWidget(QLabel("X Location:"))
         self.x_loc = QSpinBox()
@@ -224,6 +306,17 @@ class SwissRollDialog(QDialog):
         points_layout.addWidget(self.z_step)
         layout.addLayout(points_layout)
 
+        # Direction extents parameters
+        extents_layout = QHBoxLayout()
+        extents_layout.addWidget(QLabel("Number of Direction Extents:"))
+        self.num_directions = QSpinBox()
+        self.num_directions.setRange(4, 10000)  
+        self.num_directions.setValue(8)  # Default value
+        self.num_directions.setMinimumWidth(100)
+        self.num_directions.setToolTip("Number of radial directions to sample for mask constraints")
+        extents_layout.addWidget(self.num_directions)
+        layout.addLayout(extents_layout)
+
         # Total points display
         total_points_layout = QHBoxLayout()
         total_points_layout.addWidget(QLabel("Total Points:"))
@@ -265,15 +358,19 @@ class SwissRollDialog(QDialog):
             'z_step': self.z_step.value(),
             'xy_points': self.xy_points.value(),
             'use_umbilicus': self.use_umbilicus.isChecked(),
-            'direction': -1 if self.direction.currentText() == "Counter-clockwise" else 1
+            'use_mask': self.use_mask.isChecked(),
+            'volume_view': self.volume_view,
+            'direction': -1 if self.direction.currentText() == "Counter-clockwise" else 1,
+            'num_directions': self.num_directions.value()
         }
         
     def setActiveFragment(self, fragment_view):
         """Enable/disable umbilicus checkbox based on active fragment"""
         if fragment_view and hasattr(fragment_view, 'fragment') and hasattr(fragment_view.fragment, 'is_umbilicus'):
             self.use_umbilicus.setEnabled(True)
-            if self.use_umbilicus.isChecked():
-                self.updateFromUmbilicus(fragment_view)
+            self.use_umbilicus.setChecked(True)
+            # if self.use_umbilicus.isChecked():
+            self.updateFromUmbilicus(fragment_view)
         else:
             self.use_umbilicus.setEnabled(False)
             self.use_umbilicus.setChecked(False)

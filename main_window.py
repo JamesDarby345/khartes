@@ -63,7 +63,7 @@ from ppm import Ppm
 from utils import Utils
 from gl_data_window import GLDataWindow
 from gl_surface_window import GLSurfaceWindow
-from swiss_roll import SwissRollDialog, create_swiss_roll_obj
+from swiss_roll import SwissRollDialog, create_swiss_roll_obj, calculate_direction_extents
 
 class ColorBlock(QLabel):
 
@@ -2243,7 +2243,18 @@ class MainWindow(QMainWindow):
         dialog.setActiveFragment(self.project_view.mainActiveFragmentView())
         if dialog.exec_() == QDialog.Accepted:
             values = dialog.getValues()
-            directional_extents = [3000, 2000, 3000, 2000]
+            # Calculate directional extents if using mask
+            if values['use_mask']:
+                directional_extents = calculate_direction_extents(
+                    values['volume_view'], 
+                    (values['x_loc'], values['y_loc'], values['z_min']),
+                    values['num_directions']
+                )
+            else:
+                # Create uniform directional extents based on total width
+                width = values['total_width']
+                directional_extents = [width/2] * values['num_directions']
+                
             filename = create_swiss_roll_obj(values, dialog.getUmbilicusPoints(), directional_extents)
             self.loadObjFile(filename)
 
