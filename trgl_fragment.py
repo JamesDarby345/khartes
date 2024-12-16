@@ -8,6 +8,9 @@ import traceback
 from scipy.spatial import Delaunay
 import scipy
 import cv2
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor
+import os
 
 from utils import Utils
 from base_fragment import BaseFragment, BaseFragmentView
@@ -16,6 +19,53 @@ from uv_mapper import UVMapper
 
 from PyQt5.QtGui import QColor
 from aabb_tree import AABBTree
+from PyQt5.QtCore import QThread, pyqtSignal, QEventLoop
+import time
+class ObjParseWorker(QThread):
+    finished = pyqtSignal(tuple)
+    progress = pyqtSignal(int)
+    
+    def __init__(self, file_path):
+        super().__init__()
+        self.file_path = file_path
+        
+    def run(self):
+        try:
+            vrtl = []
+            tvrtl = []
+            trgl = []
+            
+            # Process file in a single thread first - if this is too slow we can optimize later
+            with open(self.file_path, 'r') as f:
+                total_lines = sum(1 for _ in f)
+                f.seek(0)
+                
+                for i, line in enumerate(f):
+                    line = line.strip()
+                    words = line.split()
+                    if not words:
+                        continue
+                    if words[0][0] == '#':
+                        continue
+                    elif words[0] == 'v':
+                        if len(words) == 4 or len(words) == 7:
+                            vrtl.append([float(w) for w in words[1:4]])
+                    elif words[0] == 'vt':
+                        if len(words) == 3:
+                            tvrtl.append([float(w) for w in words[1:]])
+                    elif words[0] == 'f':
+                        if len(words) == 4:
+                            trgl.append([int(w.split('/')[0])-1 for w in words[1:]])
+                            
+                    if i % 1000 == 0:
+                        progress = int((i / total_lines) * 100)
+                        self.progress.emit(progress)
+            
+            self.finished.emit((vrtl, tvrtl, trgl))
+            
+        except Exception as e:
+            print(f"Error parsing OBJ file: {e}")
+            self.finished.emit(([], [], []))
 
 class TrglFragment(BaseFragment):
     def __init__(self, name):
@@ -26,113 +76,119 @@ class TrglFragment(BaseFragment):
         self.direction = 0
         self.params = {}
         self.type = BaseFragment.Type.TRGL_FRAGMENT
-
-    # class function
-    # expected to return a list of fragments, but always
-    # returns only one
+        
+    @staticmethod
     def load(obj_file):
+        timer = Utils.Timer()
+        timer.active = True
+        timer.time("Start load")
+        
         print("loading obj file", obj_file)
+        stime = time.time()
         pname = Path(obj_file)
         try:
-            fd = pname.open("r")
-        except:
-            return None
-
-        name = pname.stem
-        
-        vrtl = []
-        tvrtl = []
-        trgl = []
-        
-        created = ""
-        frag_name = ""
-        for line in fd:
-            line = line.strip()
-            words = line.split()
-            if words == []: # prevent crash on empty line
-                continue
-            if words[0][0] == '#':
-                if len(words) > 2: 
-                    if words[1] == "Created:":
-                        created = words[2]
-                    if words[1] == "Name:":
-                        frag_name = words[2]
-            elif words[0] == 'v':
-                # len is 7 if the vrt has color attached
-                # (color is ignored)
-                if len(words) == 4 or len(words) == 7:
-                    vrtl.append([float(w) for w in words[1:4]])
-            elif words[0] == 'vt':
-                if len(words) == 3:
-                    tvrtl.append([float(w) for w in words[1:]])
-            elif words[0] == 'f':
-                if len(words) == 4:
-                    # implicit assumption that v == vt
-                    trgl.append([int(w.split('/')[0])-1 for w in words[1:]])
-        print("tf obj reader", len(vrtl), len(tvrtl), len(trgl))
-        
-        if frag_name == "":
-        #     frag_name = name.replace("_",":").replace("p",".")
+            # Create worker thread
+            worker = ObjParseWorker(str(pname))
+            
+            # Create event loop to wait for results while keeping UI responsive
+            loop = QEventLoop()
+            result_data = [None]  # Use list to store result since nonlocal not needed
+            
+            def handle_finished(data):
+                result_data[0] = data
+                loop.quit()
+            
+            worker.finished.connect(handle_finished)
+            worker.start()
+            
+            # Wait for worker to finish while keeping UI responsive
+            loop.exec_()
+            timer.time("Worker finished")
+            
+            if result_data[0] is None:
+                print("Error: No data received from worker")
+                return None
+                
+            vrtl, tvrtl, trgl = result_data[0]
+            print("tf obj reader", len(vrtl), len(tvrtl), len(trgl))
+            timer.time("Got worker results")
+            
+            name = pname.stem
+            created = ""
             frag_name = name
-        trgl_frag = TrglFragment(frag_name)
-        if len(vrtl) > 0:
-            trgl_frag.gpoints = np.array(vrtl, dtype=np.float32)
-        else:
-            trgl_frag.gpoints = np.zeros((0,3), dtype=np.float32)
-        if len(tvrtl) > 0:
-            trgl_frag.gtpoints = np.array(tvrtl, dtype=np.float32)
-        else:
-            trgl_frag.gtpoints = np.zeros((0,2), dtype=np.float32)
-        if len(trgl) > 0:
-            trgl_frag.trgls = np.array(trgl, dtype=np.int32)
-        else:
-            trgl_frag.trgls = np.zeros((0,3), dtype=np.int32)
-        if created == "":
-            ts = Utils.vcToTimestamp(name)
-            if ts is not None:
-                created = ts
-        if created != "":
-            trgl_frag.created = created
-        trgl_frag.params = {}
-        
-        mname = pname.with_suffix(".mtl")
-        fd = None
-        color = None
-        try:
-            fd = mname.open("r")
-        except:
-            print("failed to open mtl file",mname.name)
-            pass
+                
+            trgl_frag = TrglFragment(frag_name)
+            
+            if len(vrtl) > 0:
+                trgl_frag.gpoints = np.array(vrtl, dtype=np.float32)
+            else:
+                trgl_frag.gpoints = np.zeros((0,3), dtype=np.float32)
+                
+            if len(tvrtl) > 0:
+                trgl_frag.gtpoints = np.array(tvrtl, dtype=np.float32)
+            else:
+                trgl_frag.gtpoints = np.zeros((0,2), dtype=np.float32)
+                
+            if len(trgl) > 0:
+                trgl_frag.trgls = np.array(trgl, dtype=np.int32)
+            else:
+                trgl_frag.trgls = np.zeros((0,3), dtype=np.int32)
+            timer.time("Created arrays")
+                
+            if created == "":
+                ts = Utils.vcToTimestamp(name)
+                if ts is not None:
+                    created = ts
+            if created != "":
+                trgl_frag.created = created
+                
+            trgl_frag.params = {}
+            
+            # Handle MTL file
+            mname = pname.with_suffix(".mtl")
 
-        if fd is not None:
-            for line in fd:
-                words = line.split()
-                # print("words[0]", words[0])
-                if len(words) == 4 and words[0] == "Kd":
-                    try:
-                        # print("words", words)
-                        r = float(words[1])
-                        g = float(words[2])
-                        b = float(words[3])
-                    except:
-                        continue
-                    # print("rgb", r,g,b)
-                    color = QColor.fromRgbF(r,g,b)
-                    break
-
-        if color is None:
-            color = Utils.getNextColor()
-        trgl_frag.setColor(color, no_notify=True)
-        trgl_frag.valid = True
-        trgl_frag.neighbors = BaseFragment.findNeighbors(trgl_frag.trgls)
-        print(trgl_frag.name, trgl_frag.color.name(), trgl_frag.gpoints.shape, trgl_frag.gtpoints.shape, trgl_frag.trgls.shape)
-        # print("tindexes", BaseFragment.trglsAroundPoint(100, trgl_frag.trgls))
-        if len(trgl_frag.gtpoints) > 0:
-            tmp_fv = trgl_frag.createView(None)
-            tmp_fv.setScaledTexturePoints(similar=False)
-            trgl_frag.gtpoints = tmp_fv.stpoints
-
-        return [trgl_frag]
+            fd = None
+            color = None
+            try:
+                with mname.open("r") as fd:
+                    for line in fd:
+                        words = line.split()
+                        if len(words) == 4 and words[0] == "Kd":
+                            try:
+                                r = float(words[1])
+                                g = float(words[2])
+                                b = float(words[3])
+                                color = QColor.fromRgbF(r,g,b)
+                                break
+                            except:
+                                continue
+            except:
+                print("failed to open mtl file", mname.name)
+            timer.time("Read MTL file")
+                
+            if color is None:
+                color = Utils.getNextColor()
+                
+            trgl_frag.setColor(color, no_notify=True)
+            trgl_frag.valid = True
+            trgl_frag.neighbors = BaseFragment.findNeighbors(trgl_frag.trgls)
+            timer.time("Set fragment properties")
+            
+            print(trgl_frag.name, trgl_frag.color.name(), trgl_frag.gpoints.shape, 
+                    trgl_frag.gtpoints.shape, trgl_frag.trgls.shape)
+                    
+            if len(trgl_frag.gtpoints) > 0:
+                tmp_fv = trgl_frag.createView(None)
+                tmp_fv.setScaledTexturePoints(similar=False)
+                timer.time("Set scaled texture points")
+                trgl_frag.gtpoints = tmp_fv.stpoints
+                
+            print("tf load for", obj_file, time.time() - stime)
+            return [trgl_frag]
+            
+        except Exception as e:
+            print(f"Error loading OBJ file: {e}")
+            return None
 
     def createView(self, project_view):
         return TrglFragmentView(project_view, self)
@@ -596,17 +652,15 @@ class TrglFragmentView(BaseFragmentView):
     '''
 
     def setScaledTexturePoints(self, similar=True):
-        # similar=False
-        # traceback.print_stack()
+        timer = Utils.Timer()
+        timer.active = True  # Enable timing
+        
+        timer.time("Start setScaledTexturePoints")
         f = self.fragment
-        # print("sstp")
-        # if self.stpoints is not None and len(self.trgls()) >= 10 and len(f.gpoints) == self.prev_pt_count:
+        
         if self.stpoints is not None and len(f.gpoints) == self.prev_pt_count:
-            # print("sstp returning")
             return
-        # self.stpoints = None
-        # self.all_stpoints = None
-        # print("sstp set stpoints to None")
+            
         self.prev_pt_count = len(f.gpoints)
         if len(f.gtpoints) != len(f.gpoints):
             print("length mismatch", len(f.gtpoints), len(f.gpoints), "in volume",self.fragment.name)
@@ -616,181 +670,89 @@ class TrglFragmentView(BaseFragmentView):
 * something wrong with the input obj file.
 * Khartes will probably crash soon.
 *******************************************************
-                  ''')
+              ''')
             return
 
+        timer.time("Initial checks")
+        
         self.deleteDisconnectedComponents()
-        # self.deleteFreePoints()
-        timer = Utils.Timer()
-        timer.active = False
-        # print("t, v",self.trgls().shape, self.vpoints.shape)
+        timer.time("Delete disconnected components")
 
         # original xyzs
-        # TODO: should use gpoints instead of vpoints??
-        # oxyzs = self.vpoints[:,0:3].astype(np.float64)
         oxyzs = self.fragment.gpoints.astype(np.float64)
-        # oxyzs = f.gpoints[:]
-        # txyzs is array[trgl #][trgl pt (0, 1, or 2)][pt xyz]
         txyzs = oxyzs[self.trgls()].astype(np.float64)
-
         gtps = self.fragment.gtpoints.astype(np.float64)
-        # print("gtp range", gtps.min(axis=0), gtps.max(axis=0))
-
-        # print(txyzs[0], txyzs[-1])
+        
+        timer.time("Array setup")
 
         # centers of triangles
         cxyzs = txyzs.sum(axis=1)/3
-        # print(cxyzs.shape)
         cxyzs = cxyzs[:,np.newaxis,:]
-
-        # print(cxyzs[0], cxyzs[-1])
-
-        # Shift each trgl in txyzs so that the center of each
-        # triangle is at the origin of the xyz coordinate system
         txyzs -= cxyzs
+        
+        timer.time("Triangle centers calculation")
 
-        # print(txyzs[0], txyzs[-1])
-        # print("txyzs", txyzs.shape)
         t01 = txyzs[:,1]-txyzs[:,0]
         t02 = txyzs[:,2]-txyzs[:,0]
-        # print("t10", t10.shape)
-        # print(txyzs[0])
-        # print(t10[0])
-
-        # an array with the normal of each triangle
-        # (not yet normalized)
         tnorm = np.cross(t01, t02)
+        
+        timer.time("Normal calculation")
 
-        # print(tnorm.shape, weights.shape)
-
-        # For each triangle, fxyaxis lies in the plane of the triangle,
-        # and is perpendicular to the z axis
-        # NOTE that in the local transposed coordinate
-        # system, the global z axis is in the local y direction.
-        # fxyaxis = np.cross(tnorm, (0.,1.,0))
         fxyaxis = np.cross(tnorm, (0.,0.,1))
-        # print("ijk axis", self.iIndex, self.jIndex, self.kIndex)
-
-        # For each triangle, calculate a weight based on the
-        # cross product of the unnormalized triangle normal and
-        # the z axis.
-        # This weight will be used later in the least-squares process.
-        # The idea is: triangles whose normal points in the z-axis
-        # direction are not going to provide reliable information on
-        # orientation.
         weights = np.sqrt((fxyaxis*fxyaxis).sum(axis=1))
+        
+        timer.time("Weight calculation")
+
         nw = len(weights)
         if nw > 10:
             wsort = np.argsort(weights)
             median_weight = weights[wsort[nw//2]]
-            min_weight = weights[wsort[0]]
-            max_weight = weights[wsort[-1]]
-            weight90 = weights[wsort[(9*nw)//10]]
-            # print("weight range", min_weight, median_weight, weight90, max_weight)
             max_allowed_weight = 4*median_weight
             weights[weights > max_allowed_weight] = max_allowed_weight
-
+        
+        timer.time("Weight adjustment")
 
         weights = weights.reshape(-1,1,1)
-
-        # For each triangle, fzaxis lies in the plane of the triangle,
-        # and is perpendicular to the triangle's normal and to
-        # fxyaxis.  Note also that fzaxis lies in the plane formed
-        # by the z axis, and the triangle's normal.
         fzaxis = np.cross(tnorm, fxyaxis)
 
-        # normalize fzaxis
+        # normalize axes
         norm = np.linalg.norm(fzaxis, axis=1, keepdims=True)
         norm[norm==0] = 1.
         fzaxis = fzaxis/norm
 
-        # normalize fxyaxis
         norm = np.linalg.norm(fxyaxis, axis=1, keepdims=True)
         norm[norm==0] = 1.
-        fxyaxis = fxyaxis/norm
+        fxyaxis /= norm
+        
+        timer.time("Axis normalization")
 
-        # print(fzaxis[0], fzaxis[-1])
-        # re-center xyz to center of triangle, apply axes to get fxy, fz
-        # compare this to re-centered u,v
-        # print(fxyaxis.shape)
         fxyaxis = fxyaxis[:,np.newaxis,:]
-        # print(fxyaxis.shape)
-
-        # For each vertex of each triangle, calculate the vertex's
-        # position in the new coordinate system formed by the
-        # orthognal normalized axes fxyaxis and fzaxis.
-        # Because these axes lie in the plane of the triangle,
-        # each triangle in the new coordinate system will have the
-        # same area and vertex angles as it did in the original xyz
-        # coordinate system
         tfxy = (txyzs*fxyaxis).sum(axis=2)
         fzaxis = fzaxis[:,np.newaxis,:]
-        # print(fxyaxis.shape)
         tfz = (txyzs*fzaxis).sum(axis=2)
         tfxy = np.stack((tfxy, tfz), axis=2)
+        
+        timer.time("Coordinate transformation")
 
-        # print(tfxy.shape, tfz.shape, tfxyz.shape)
-        # print(tfxy[0])
-        # print(tfz[0])
-        # print(tfxyz[0])
-        # print(fxyaxis[0])
-        # print(txyzs[0])
-        # print((txyzs*fxyaxis)[0])
-        # print(tfxy[0])
-        # TODO: now do the same with fzaxis
-        # then combine to form tfxys
-        # mxyz = np.stack((fxyaxis,fzaxis), axis=0)
-        # print(fxyaxis[0])
-        # print(fzaxis[0])
-        # print(mxyz[0])
-
-        # tuvs contains the uv coordinates of each
-        # vertex of each triangle.  Each row in tuvs
-        # represents a single triangle, analogous to
-        # txyzs at the top of this function
         tuvs = gtps[self.trgls()].astype(np.float64)
-        # print("tuvs", tuvs.shape)
-        # TODO: testing!
-        # tuvs = tuvs[:,:,(1,0)]
-        # print("tuvs", tuvs.shape)
-
-        # Calculate the center of each triangle in uv coordinates.
         cuvs = tuvs.sum(axis=1)/3
         cuvs = cuvs[:,np.newaxis,:]
-        # Shift each trgl in tuvs so that the center of the triangle
-        # in uv space lies at the origin of the uv coordinate system.
         tfuv = tuvs-cuvs
-        # print(tfxyz.shape, tfuv.shape)
+        
+        timer.time("UV coordinate processing")
 
         tfxynw = tfxy.copy()
-        # apply the weights to the xy and uv coordinates
         tfxy *= weights
         tfxy = tfxy.reshape(-1,2)
         tfuv *= weights
         tfuv = tfuv.reshape(-1,2)
-        # print(tfxy.shape, tfuv.shape)
 
-        # extract the re-centered u and v for each vertex of each triangle
         u = tfuv[:,0]
         v = tfuv[:,1]
-        # extract the re-centered, flattened x and y for each
-        # vertex of each triangle
         x = tfxy[:,0]
         y = tfxy[:,1]
-
-        # u, v, x, and y are each one-dimensional arrays whose
-        # length is 3 times the number of triangles
-
-        # n = len(u)
-
-        # Solve a least-squares problem.  The idea is to
-        # find 4 numbers, (a,b,c,d), that minimize the error
-        # in these two equations:
-        # a*u + b*v = x
-        # c*u + d*v = y
-        # where u, v, x, y are the arrays computed above.
-
-        # The math is not derived here.
+        
+        timer.time("Coordinate reshaping")
 
         uu = (u*u).sum()
         uv = (u*v).sum()
@@ -800,31 +762,20 @@ class TrglFragmentView(BaseFragmentView):
         vx = (v*x).sum()
         vy = (v*y).sum()
 
-        # mden = uu+vv-2*uv
         mden = uu*vv - uv*uv
         mden2 = uu+vv
+        
+        timer.time("Matrix calculations")
 
-        # sn = n
-        # print("mden", mden/len(u))
-        # print("uu vv uv", uu/sn, uv/sn, vv/sn)
-        # print("uxy vxy", ux/sn, uy/sn, vx/sn, vy/sn)
         if mden == 0 or mden2 == 0:
-            '''
-            print("mden = 0")
-            print("oxyzs,txyzs")
-            print(oxyzs)
-            print(txyzs)
-            '''
             print("mden, mden2", mden, mden2)
             return
 
-        # print("gt min max", gtp.min(axis=0), gtp.max(axis=0))
         gu = gtps[:,0]
         gv = gtps[:,1]
         stp = np.zeros_like(gtps)
 
         if similar:
-            # print("similar")
             abcds = []
 
             a = (ux - vy)/mden2
@@ -839,7 +790,6 @@ class TrglFragmentView(BaseFragmentView):
             d = a
             abcds.append((a,b,c,d))
 
-            # TODO: for testing only
             a = ( vv*ux - uv*vx)/mden
             b = (-uv*ux + uu*vx)/mden
             c = ( vv*uy - uv*vy)/mden
@@ -851,109 +801,59 @@ class TrglFragmentView(BaseFragmentView):
                 stp[:,0] = a*gu + b*gv
                 stp[:,1] = c*gu + d*gv
                 tuvs = stp[self.trgls()].astype(np.float64)
-    
-                # Calculate the center of each triangle in uv coordinates.
                 cuvs = tuvs.sum(axis=1)/3
                 cuvs = cuvs[:,np.newaxis,:]
-                # Shift each trgl in tuvs so that the center of the triangle
-                # in uv space lies at the origin of the uv coordinate system.
                 tfuv = tuvs-cuvs
-
                 dd = tfxynw.flatten() - tfuv.flatten()
                 error = np.sqrt((dd*dd).sum())/len(dd)
                 errors.append(error)
-                # print("abcd", a,b,c,d)
-                # print("st error", error)
-                # print(tfuv[0])
-                # print(tfxynw[0:3])
 
-            # print("st errors", errors)
             if errors[0] < errors[1]:
                 a,b,c,d = abcds[0]
             else:
                 a,b,c,d = abcds[1]
-
         else:
             print("affine")
-            # denominator of the inverse of A.t()@A
             a = ( vv*ux - uv*vx)/mden
             b = (-uv*ux + uu*vx)/mden
             c = ( vv*uy - uv*vy)/mden
             d = (-uv*uy + uu*vy)/mden
-            # print("abcd", a,b,c,d)
-
-        # Now apply the coordinate transform defined
-        # by a,b,c,d to the original uv points, to get
-        # scaled transformed points
-        '''
-        sgu = np.sort(gu)
-        sgv = np.sort(gv)
-        ng = len(gtp)
-        if ng > 10:
-            print("median gtp", sgu[ng//2], sgv[ng//2])
-            print("25% gtp", sgu[ng//4], sgv[ng//4])
-            print("75% gtp", sgu[(3*ng)//4], sgv[(3*ng)//4])
-            print("min gtp", sgu[0], sgv[0])
-            print("max gtp", sgu[ng-1], sgv[ng-1])
-        '''
-        # TODO: testing!
-        # gu = gtp[:,1]
-        # gv = gtp[:,0]
+            
+        timer.time("Transformation matrix calculation")
 
         stp[:,0] = a*gu + b*gv
         stp[:,1] = c*gu + d*gv
-        # stp[:,0] -= stp[:,0].min()
-        # stp[:,1] -= stp[:,1].min()
         self.st_abcd = (a,b,c,d)
 
         stmin = stp.min(axis=0)
         stmax = stp.max(axis=0)
-        # print("st min max", stmin, stmax)
         styc = .5*(stmin[1]+stmax[1])
         xyzmin = oxyzs.min(axis=0)
         xyzmax = oxyzs.max(axis=0)
-        # print("xyz min max", xyzmin, xyzmax)
-        # zc = .5*(xyzmin[2]+xyzmax[2])
-        # See note above; global z axis is in local y-axis direction
         zc = .5*(xyzmin[1]+xyzmax[1])
-        # print("styc zc", styc, zc)
+        
+        timer.time("Final coordinate calculations")
 
-        # print("stx range", stp[:,0].min(), stp[:,0].max())
-        # print("sty range", stp[:,1].min(), stp[:,1].max())
-        # shift the points so that the minimums are at the origin
-        # self.st_shift = -stp.min(axis=0)
         self.st_shift = -stmin
-        # but then center z
         self.st_shift[1] = zc-styc
         stp += self.st_shift
-        timer.time("scale uv time")
-        # print("stx range", stp[:,0].min(), stp[:,0].max())
-        # print("sty range", stp[:,1].min(), stp[:,1].max())
 
-        # at last, set the st ("scaled texture") points
         self.stpoints = stp
-        # self.stmin = stmin
-        # self.stmax = stmax
         self.stmin = stp.min(axis=0)
         self.stmax = stp.max(axis=0)
-        # self.xyzmin = xyzmin
-        # self.xyzmax = xyzmax
 
-        # stsize = self.stmax-self.stmin
-        # starea = (stsize*stsize).sum()
-        # ptarea = starea / len(self.stpoints)
-        # self.avg_st_len = math.sqrt(ptarea)
         lens = TrglPointSet.edgeLengths(self.stpoints, self.trgls())
         self.avg_st_len = 0.
         if len(lens) > 0:
             self.avg_st_len = lens.sum()/len(lens)
-        # print(self.stmin, self.stmax, starea, ptarea, self.avg_st_len)
-        # print(self.stmin, self.stmax, self.avg_st_len)
+        
+        timer.time("Edge length calculations")
+
         self.outside_stpoints = self.outsidePoints(self.avg_st_len)
-        # print("stp", stp.shape, "outside", self.outside_stpoints.shape)
         self.all_stpoints = np.concatenate((stp, self.outside_stpoints), axis=0)
         self.retriangulateAll()
-        timer.time("retriangulate time")
+        
+        timer.time("Final triangulation")
 
     def setStxyDefaults(self):
         self.st_abcd = (1.,0.,0.,1.)
@@ -1388,16 +1288,6 @@ class TrglFragmentView(BaseFragmentView):
         old_stxys = self.all_stpoints[indices]
         new_stxys = old_stxys + rduijks[:, :2]
         timer.time("Calculate new positions")
-
-        # Check for duplicate points
-        #TODO: is this necessary? it takes a long time with many points
-        # if update_st:
-        #     for idx, new_stxy in zip(indices, new_stxys):
-        #         if (new_stxy != self.all_stpoints[idx]).all() and self.pointExists(new_stxy):
-        #             print(f"move: point {idx} already exists")
-        #             return
-
-        # timer.time("Check duplicates")
 
         # Update xyz coordinates if requested
         if update_xyz:

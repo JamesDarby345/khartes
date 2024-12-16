@@ -287,10 +287,9 @@ class DataWindow(QLabel):
             fv = self.cur_frag_pts_fv[nearbyNode]
             fv.setWorkingRegion(index, 60.)
 
-    # overridden in GLSurfaceWindow
     def setNearbyNodeIjk(self, ijk, update_xyz, update_st):
         timer = Utils.Timer()
-        timer.active = True        # print("snni", update_xyz, update_st)
+        timer.active = True
         xyijks = self.cur_frag_pts_xyijk
         nearbyNode = self.localNearbyNodeIndex
         if nearbyNode >= 0 and xyijks is not None and xyijks.shape[0] != 0:
@@ -303,41 +302,37 @@ class DataWindow(QLabel):
             new_tijk[self.iIndex] = i
             new_tijk[self.jIndex] = j
             new_tijk[self.axis] = k
-            # True if successful
-            # if fv.movePoint(index, new_tijk):
             timer.time("update tijk")
-            if self.window.movePoint(fv, index, new_tijk, update_xyz, update_st):
-                timer.time("*move point")
-                # wpos = e.localPos()
-                # wxy = (wpos.x(), wpos.y())
-                # nearbyNode = self.findNearbyNode(wxy)
-                # if not self.setNearbyNode(nearbyNode):
-                #     self.window.drawSlices()
-                # Don't try to re-find the nearest node, since user probably
-                # wants to continue using the key to move the node even
-                # if the node moves out of "nearby" range
+
+            # Compute delta for all selected nodes if applicable
+            old_tijk = np.array(tijk)
+            new_tijk_arr = np.array(new_tijk)
+            delta = new_tijk_arr - old_tijk
+            
+            # If the dragged node is part of a selected node group, move them all
+            if len(fv.selected_nodes) > 0 and index in fv.selected_nodes:
+                # Gather all selected nodes including the dragged one
+                indices = np.array(list(fv.selected_nodes.union({index})), dtype=np.int32)
+                
+                # Compute old positions of these nodes
+                old_positions = fv.vpoints[indices, :3]
+                # Apply delta to get new positions
+                new_positions = old_positions + delta
+
+                # Move all nodes at once
+                self.setWaitCursor()
+                success = fv.movePoints(indices, new_positions, update_xyz, update_st)
+            else:
+                # Move only the single node
+                self.setWaitCursor()
+                success = self.window.movePoint(fv, index, new_tijk, update_xyz, update_st)
+
+            timer.time("*move point(s)")
+            if success:
                 self.window.drawSlices()
                 timer.time("Draw slices")
-                # but need to keep track of current nearest
-                # node in case node numbering in window changes
                 self.updateNearbyNode()
                 timer.time("Update nearby node")
-                '''
-                old_local_nearby = self.localNearbyNodeIndex
-                pv = self.window.project_view
-                old_global_nearby = pv.nearby_node_index
-                xyijks = self.cur_frag_pts_xyijk
-                xyijks_valid = (xyijks is not None and xyijks.shape[0] != 0)
-                if old_local_nearby >= 0 and xyijks_valid:
-                    new_local_nearbys = np.nonzero(xyijks[:,5]==old_global_nearby)[0]
-                    if len(new_local_nearbys) == 0:
-                        new_local_nearby = -1
-                    else:
-                        new_local_nearby = new_local_nearbys[0]
-                    if new_local_nearby != old_local_nearby:
-                        print("setting", old_local_nearby, new_local_nearby)
-                        self.setNearbyNode(new_local_nearby)
-                '''
 
 
     # return True if nearby node changed, False otherwise

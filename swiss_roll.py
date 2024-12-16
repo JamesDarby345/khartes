@@ -300,7 +300,7 @@ class SwissRollDialog(QDialog):
         points_layout.addWidget(QLabel("Z Step:"))
         self.z_step = QSpinBox()
         self.z_step.setRange(2, 10000)
-        self.z_step.setValue(20)
+        self.z_step.setValue(100)
         self.z_step.valueChanged.connect(self.updateTotalPoints)
         self.z_step.setMinimumWidth(100)
         points_layout.addWidget(self.z_step)
