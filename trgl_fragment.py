@@ -1611,28 +1611,53 @@ class TrglFragmentView(BaseFragmentView):
             return
         if self.stpoints is None or index >= len(self.stpoints):
             return
-        # half_width = self.half_width_multiplier*self.avg_st_len
-        mel = self.maxStEdgeLengthAroundPoint(index)
+
+        # If the node is part of selected_nodes, delete all selected nodes
+        points_to_delete = {index}
+        if hasattr(self, 'selected_nodes') and index in self.selected_nodes:
+            points_to_delete = self.selected_nodes.copy()
+        
+        # Sort indices in descending order to avoid index shifting issues
+        sorted_indices = sorted(points_to_delete, reverse=True)
+        
+        # Get parameters for triangulation update (using the first point as reference)
+        mel = self.maxStEdgeLengthAroundPoint(sorted_indices[-1])  # Use first point (lowest index)
         half_width = self.half_width_multiplier*self.avg_st_len
         half_width = max(half_width, 2.*mel)
 
-        old_stxy = self.all_stpoints[index]
+        # Store old state for triangulation
+        old_stxy = self.all_stpoints[sorted_indices[-1]]  # Use first point's position
         ops = TrglPointSet(self.all_stpoints, len(self.stpoints), old_stxy, half_width)
         osqcm = self.calculateSqCmOfTrgls(ops.triangulate())
-        nps = TrglPointSet(self.all_stpoints, len(self.stpoints), old_stxy, half_width)
-        nps.deletePoint(index)
-        # Retriangulate before deleting point from self.stpoints etc
-        self.applyTrglDiff(ops, nps)
-        self.fragment.trgls[self.fragment.trgls>index] -= 1
 
-        self.fragment.gpoints = np.delete(self.fragment.gpoints, index, 0)
-        self.fragment.gtpoints = np.delete(self.fragment.gtpoints, index, 0)
-        self.fpoints = np.delete(self.fpoints, index, 0)
-        self.vpoints = np.delete(self.vpoints, index, 0)
+        # Delete all points at once from arrays
+        mask = np.ones(len(self.fragment.gpoints), dtype=bool)
+        mask[list(points_to_delete)] = False
+        
+        self.fragment.gpoints = self.fragment.gpoints[mask]
+        self.fragment.gtpoints = self.fragment.gtpoints[mask]
+        self.fpoints = self.fpoints[mask]
+        self.vpoints = self.vpoints[mask]
         self.vpoints[:,3] = np.arange(len(self.vpoints))
-        self.stpoints = np.delete(self.stpoints, index, 0)
-        self.all_stpoints = np.delete(self.all_stpoints, index, 0)
+        self.stpoints = self.stpoints[mask]
+        self.all_stpoints = np.delete(self.all_stpoints, list(points_to_delete), 0)
 
+        # Update triangle indices - remove triangles that reference deleted points
+        old_trgls = self.fragment.trgls.copy()
+        valid_trgls = np.ones(len(old_trgls), dtype=bool)
+        
+        # Mark triangles containing deleted points as invalid
+        for idx in sorted_indices:
+            valid_trgls &= ~np.any(old_trgls == idx, axis=1)
+            old_trgls[old_trgls > idx] -= 1
+        
+        self.fragment.trgls = old_trgls[valid_trgls]
+
+        # Update triangulation once for all deleted points
+        nps = TrglPointSet(self.all_stpoints, len(self.stpoints), old_stxy, half_width)
+        self.applyTrglDiff(ops, nps)
+        
+        # Final triangulation update
         ops2 = TrglPointSet(self.all_stpoints, len(self.stpoints), old_stxy, half_width)
         constrained = self.adjustStPoints(-1, half_width, old_stxy)
         nps2 = TrglPointSet(self.all_stpoints, len(self.stpoints), old_stxy, half_width)
@@ -1640,21 +1665,18 @@ class TrglFragmentView(BaseFragmentView):
         nsqcm = self.calculateSqCmOfTrgls(nps2.triangulate())
         dsqcm = nsqcm-osqcm
         self.sqcm += dsqcm
-        # print(self.sqcm, self.calculateSqCmOfTrgls(self.trgls()))
-        # nps2match = len(nps.indexes) == len(nps2.indexes) and (nps.indexes == nps2.indexes).all()
         nps2match = len(ops2.indexes) == len(nps2.indexes) and (ops2.indexes == nps2.indexes).all()
 
-        # prevent setScaledTexturePoints from running
-        # when setLocalPoints is called
-        if constrained and nps2match:
-            # No need to do anything; self.vpoints and self.fpoints
-            # have already been updated
-            pass
-            # self.prev_pt_count = len(self.fragment.gpoints)
-        else:
+        # Update local points if needed
+        if not (constrained and nps2match):
             if not nps2match:
                 print("deletePointByIndex: set local points", constrained, nps2match)
             self.setLocalPoints(True, False)
+
+        # Clear selected nodes after deletion
+        if hasattr(self, 'selected_nodes'):
+            self.selected_nodes = set()
+            
         self.fragment.notifyModified()
 
     # returns list of trgl indexes
