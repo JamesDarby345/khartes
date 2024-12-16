@@ -1013,7 +1013,7 @@ class DataWindow(QLabel):
             if delta > 0:
                 fv.k_neighbors = min(fv.k_neighbors + increment, len(fv.vpoints) - 1)
             else:
-                fv.k_neighbors = max(1, fv.k_neighbors - increment)
+                fv.k_neighbors = max(0, fv.k_neighbors - increment)  # Changed from 1 to 0
             fv.updateSelectedNodes(pv.nearby_node_index, k=fv.k_neighbors, use_3d=False)
                 
         self.window.drawSlices()

@@ -558,13 +558,18 @@ class BaseFragmentView:
                 self.selected_nodes = set()
                 return
             
-            # Start with the selected vertex
+            # Start with just the selected vertex
+            self.selected_nodes = {point_index}
+
+            # If steps is 0, we're done - just return the single point
+            steps = radius if radius is not None else (k if k is not None else self.k_neighbors)
+            if steps <= 0:
+                return
+
+            # Otherwise do the BFS traversal
             current_nodes = {point_index}
             all_nodes = current_nodes.copy()
-            
-            # Number of steps to traverse
-            steps = radius if radius is not None else (k if k is not None else self.k_neighbors)
-            
+
             # Traverse the graph using BFS
             for _ in range(steps):
                 next_nodes = set()
@@ -574,7 +579,7 @@ class BaseFragmentView:
                 all_nodes.update(current_nodes)
                 if not current_nodes:  # No more nodes to explore
                     break
-                
+
             self.selected_nodes = all_nodes
 
         # Remove the query point itself
