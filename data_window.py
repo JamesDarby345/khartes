@@ -309,24 +309,40 @@ class DataWindow(QLabel):
             new_tijk_arr = np.array(new_tijk)
             delta = new_tijk_arr - old_tijk
             
-            # If the dragged node is part of a selected node group, move them all
-            if len(fv.selected_nodes) > 0 and index in fv.selected_nodes:
-                # Gather all selected nodes including the dragged one
-                indices = np.array(list(fv.selected_nodes.union({index})), dtype=np.int32)
-                
-                # Compute old positions of these nodes
-                old_positions = fv.vpoints[indices, :3]
-                # Apply delta to get new positions
-                new_positions = old_positions + delta
+            modifiers = QApplication.queryKeyboardModifiers()
+            ctrl_pressed = bool(modifiers & Qt.ControlModifier)
+            alt_pressed = bool(modifiers & Qt.AltModifier)
 
-                # Move all nodes at once
+            if len(fv.selected_nodes) > 0 and index in fv.selected_nodes:
+                indices = np.array(list(fv.selected_nodes.union({index})), dtype=np.int32)
+                old_positions = fv.vpoints[indices, :3]
+                dragged_node_pos = fv.vpoints[index, :3]
+                diffs = old_positions - dragged_node_pos
+
+                if ctrl_pressed:
+                    # Ctrl is pressed: Use proportional movement logic
+                    dists = np.sqrt((diffs * diffs).sum(axis=1))
+                    max_dist = dists.max() if len(dists) > 0 else 1.0
+                    if max_dist == 0:
+                        max_dist = 1.0
+
+                    # Compute scales for each node
+                    scales = 1.0 - (dists / max_dist)
+                    scaled_deltas = np.zeros_like(diffs)
+                    for i in range(len(indices)):
+                        scaled_deltas[i] = delta * scales[i]
+                    new_positions = old_positions + scaled_deltas
+                else:
+                    # Ctrl not pressed: Move all selected nodes by the same delta
+                    new_positions = old_positions + delta
+
                 self.setWaitCursor()
                 success = fv.movePoints(indices, new_positions, update_xyz, update_st)
             else:
-                # Move only the single node
                 self.setWaitCursor()
+                # No special logic if node isn't in selected nodes or no selection: just move the single node
                 success = self.window.movePoint(fv, index, new_tijk, update_xyz, update_st)
-
+                
             timer.time("*move point(s)")
             if success:
                 self.window.drawSlices()
