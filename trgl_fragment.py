@@ -15,6 +15,7 @@ from fragment import Fragment, FragmentView
 from uv_mapper import UVMapper
 
 from PyQt5.QtGui import QColor
+from aabb_tree import AABBTree
 
 class TrglFragment(BaseFragment):
     def __init__(self, name):

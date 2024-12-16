@@ -262,7 +262,7 @@ class SwissRollDialog(QDialog):
         params_layout.addWidget(QLabel("Number of Wraps:"))
         self.wraps = QDoubleSpinBox()
         self.wraps.setRange(0.1, 10000.0)
-        self.wraps.setValue(5)
+        self.wraps.setValue(100)
         self.wraps.setSingleStep(0.1)
         self.wraps.setMinimumWidth(100)
         params_layout.addWidget(self.wraps)
@@ -291,7 +291,7 @@ class SwissRollDialog(QDialog):
         points_layout.addWidget(QLabel("XY Plane Points:"))
         self.xy_points = QSpinBox()
         self.xy_points.setRange(10, 10000000)
-        self.xy_points.setValue(100)
+        self.xy_points.setValue(10000)
         self.xy_points.valueChanged.connect(self.updateTotalPoints)
         self.xy_points.setMinimumWidth(100)
         points_layout.addWidget(self.xy_points)
@@ -311,7 +311,7 @@ class SwissRollDialog(QDialog):
         extents_layout.addWidget(QLabel("Number of Direction Extents:"))
         self.num_directions = QSpinBox()
         self.num_directions.setRange(4, 10000)  
-        self.num_directions.setValue(8)  # Default value
+        self.num_directions.setValue(64)  # Default value
         self.num_directions.setMinimumWidth(100)
         self.num_directions.setToolTip("Number of radial directions to sample for mask constraints")
         extents_layout.addWidget(self.num_directions)
