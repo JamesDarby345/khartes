@@ -1263,12 +1263,16 @@ class TrglFragmentView(BaseFragmentView):
     # This depends on self.fragment.trgls being
     # up to date
     def adjustStPoints(self, index, half_width, stxy=None):
+        timer = Utils.Timer()
+        timer.active = False
         if stxy is None:
             stxy = self.all_stpoints[index]
         # print("stxy", stxy)
         osts = TrglPointSet(self.all_stpoints, len(self.stpoints), stxy, half_width)
+        timer.time(" astpts TrglPointSet")
         # print("osts indexes", osts.indexes)
         retval = osts.adjustSts(self.fragment.gpoints, self.fragment.trgls, index)
+        timer.time(" astpts adjustSts")
         if retval is None:
             print("Adjustment failed")
             return None
@@ -1278,6 +1282,7 @@ class TrglFragmentView(BaseFragmentView):
         self.stpoints[adjusted_inds] = adjusted_sts
         self.all_stpoints[adjusted_inds] = adjusted_sts
         adj_uvs = self.stxysToUvs(adjusted_sts)
+        timer.time(" astps stxysToUvs")
         self.fragment.gtpoints[adjusted_inds] = adj_uvs
         # print("Adjustment done")
         return constrained
@@ -1833,8 +1838,15 @@ class TrglPointSet:
         self.nipoints = (self.indexes < nstpoints).sum()
 
 
-    def cutBoundaryPoints(self, trgls):
-        ritrgls = self.reverse_indexes[trgls]
+    # Finds the points on the boundary that was
+    # created by windowing the surface.
+    # For efficiency, assumes that the input triangles
+    # have local indexes instead of global, with -1
+    # for indexes outside the window.
+    def cutBoundaryPoints(self, ritrgls):
+        # ritrgls = self.reverse_indexes[trgls]
+        # ctrgls (cut trgls) are trgls that have either 
+        # one or two points outside of the window
         ctrgls = ritrgls[((ritrgls<0).sum(axis=1)+1)//2 == 1]
         # print("ctrgls")
         # print(ctrgls)
@@ -2046,6 +2058,8 @@ class TrglPointSet:
     # ptindex is the index (into the list of all fragment points)
     # of the point that is being moved.
     def adjustSts(self, xyzpts, trgls, ptindex):
+        timer = Utils.Timer()
+        timer.active = False
         if trgls is None:
             return
         if len(self.pts) == 0:
@@ -2063,12 +2077,22 @@ class TrglPointSet:
         # hull would not be desirable!
         # trgls = self.triangulate()
         # print(trgls)
+        timer.time("  a")
 
         # trgls converted to use windowed-point indexing
         ltrgls = self.reverse_indexes[trgls]
-        # eliminate trgls that have points outside of the
-        # window 
-        ltrgls = ltrgls[(ltrgls >= 0).all(axis=1)]
+        timer.time("  b")
+        # trgls that have at least one point inside the window
+        in_trgls = ltrgls[(ltrgls >= 0).any(axis=1)]
+        timer.time("  b2")
+
+        ## eliminate trgls that have points outside of the
+        ## window 
+        # ltrgls = ltrgls[(ltrgls >= 0).all(axis=1)]
+
+        # trgls that have no points outside the window
+        fully_in_trgls = in_trgls[(in_trgls >= 0).all(axis=1)]
+        timer.time("  c")
         """
         bounds_flag = mapper.onBoundaryArray()
         # input point is never used as a constraint
@@ -2105,7 +2129,9 @@ class TrglPointSet:
 
         # bpts contains points that are on the boundaries
         # of cut triangles.  The points use windowed-point indexing
-        bpts = self.cutBoundaryPoints(trgls)
+        # bpts = self.cutBoundaryPoints(trgls)
+        bpts = self.cutBoundaryPoints(in_trgls)
+        timer.time("  d")
 
         """
         # print("bpts floating", bpts.shape, floating.shape, floating.sum())
@@ -2130,7 +2156,8 @@ class TrglPointSet:
         # may complain of a singular matrix)
         """
 
-        mapper = UVMapper(localxyz, ltrgls)
+        mapper = UVMapper(localxyz, fully_in_trgls)
+        timer.time("  e")
 
         if ptindex >= 0:
             bpts = bpts[bpts != self.reverse_indexes[ptindex]]
@@ -2174,5 +2201,6 @@ class TrglPointSet:
             print("  ", bigd)
             print(trgls[(trgls==bigd).any(axis=1)])
         '''
+        timer.time("  z")
         return inds, adjusted_sts, len(bpts) > 1
 

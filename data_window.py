@@ -307,6 +307,7 @@ class DataWindow(QLabel):
             # if fv.movePoint(index, new_tijk):
             timer.time("update tijk")
             if self.window.movePoint(fv, index, new_tijk, update_xyz, update_st):
+                timer.time("*move point")
                 # wpos = e.localPos()
                 # wxy = (wpos.x(), wpos.y())
                 # nearbyNode = self.findNearbyNode(wxy)

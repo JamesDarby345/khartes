@@ -773,8 +773,24 @@ class Project:
                     del pv.fragments[fragment]
             self.notifyModified()
 
+    def removeVolumeFromDisk(self, volume):
+        # filename = self.volumes_path / (volume.name + '.volzarr')
+        filename = volume.path
+        print("deleting volume file", filename)
+        try:
+            if filename.exists():
+                filename.unlink()
+        except Exception as e:
+            print(f"Warning: Failed to remove file {filename}: {e}")
+        
     def removeVolume(self, volume):
         if volume in self.volumes:
+            # Normally one would think that volumes should not
+            # be removed from disk until the next time the project is
+            # saved.  However, khartes (for historical reasons) modifies
+            # the disk immediately when the user loads a nrrd or zarr file,
+            # so I've chosen to modify it immediately on delete as well.
+            self.removeVolumeFromDisk(volume)
             self.volumes.remove(volume)
             for pv in self.project_views:
                 if volume in pv.volumes:
