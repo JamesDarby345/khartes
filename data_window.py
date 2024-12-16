@@ -289,7 +289,7 @@ class DataWindow(QLabel):
 
     def setNearbyNodeIjk(self, ijk, update_xyz, update_st):
         timer = Utils.Timer()
-        timer.active = True
+        timer.active = False
         xyijks = self.cur_frag_pts_xyijk
         nearbyNode = self.localNearbyNodeIndex
         if nearbyNode >= 0 and xyijks is not None and xyijks.shape[0] != 0:

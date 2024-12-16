@@ -288,7 +288,7 @@ class GLSurfaceWindow(DataWindow):
 
     def setNearbyNodeIjk(self, ijk, update_xyz, update_st):
         timer = Utils.Timer()
-        timer.active = True
+        timer.active = False
         
         # Get initial state
         timer.time("Start setNearbyNodeIjk")

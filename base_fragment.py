@@ -581,10 +581,6 @@ class BaseFragmentView:
                     break
 
             self.selected_nodes = all_nodes
-
-        # Remove the query point itself
-        # if point_index in self.selected_nodes:
-        #     self.selected_nodes.remove(point_index)
         
         print("selected nodes", len(self.selected_nodes))
         # return self.selected_nodes

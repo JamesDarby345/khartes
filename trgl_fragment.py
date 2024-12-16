@@ -80,7 +80,7 @@ class TrglFragment(BaseFragment):
     @staticmethod
     def load(obj_file):
         timer = Utils.Timer()
-        timer.active = True
+        timer.active = False
         timer.time("Start load")
         
         print("loading obj file", obj_file)
@@ -653,7 +653,7 @@ class TrglFragmentView(BaseFragmentView):
 
     def setScaledTexturePoints(self, similar=True):
         timer = Utils.Timer()
-        timer.active = True  # Enable timing
+        timer.active = False  # Enable timing
         
         timer.time("Start setScaledTexturePoints")
         f = self.fragment
@@ -1266,7 +1266,7 @@ class TrglFragmentView(BaseFragmentView):
         Efficiently move multiple points at once while preserving node connectivity.
         """
         timer = Utils.Timer()
-        timer.active = True # Enable timing
+        timer.active = False # Enable timing
         
         vv = self.cur_volume_view
         
