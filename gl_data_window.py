@@ -894,7 +894,7 @@ fragment_pts_code = {
       void main() {
         color = vertex_color;
         gl_Position = xform*vec4(position, 1.0);
-        gl_PointSize = vertex_size; // set per-vertex point size
+        gl_PointSize = vertex_size*2.0; // multiply by 2 since we're using radius values
       }
     ''',
 
@@ -1470,6 +1470,9 @@ class GLDataWindowChild(QOpenGLWidget):
     def localInitializeGL(self):
         f = self.gl
         f.glClearColor(.6,.3,.3,1.)
+        # Enable per-vertex point size
+        f.glEnable(pygl.GL_PROGRAM_POINT_SIZE)
+        f.glEnable(pygl.GL_VERTEX_PROGRAM_POINT_SIZE)
 
         self.buildPrograms()
         self.buildSliceVao()
@@ -1620,11 +1623,6 @@ class GLDataWindowChild(QOpenGLWidget):
         mat[3][3] = 1.
         xform = QMatrix4x4(mat.flatten().tolist())
 
-        '''
-        for i in range(4):
-            print(xform.row(i))
-        '''
-
         apply_line_opacity = dw.getDrawApplyOpacity("line")
         line_alpha = 1.
         if apply_line_opacity:
@@ -1763,7 +1761,8 @@ class GLDataWindowChild(QOpenGLWidget):
 
             if node_thickness == 0 or node_alpha == 0:
                 continue
-            f.glPointSize(node_thickness)
+            # Remove global point size setting since we're using per-vertex sizes
+            # f.glPointSize(node_thickness)
 
             color = dw.nodeColor
             if not fv.active:
@@ -2550,13 +2549,13 @@ class FragmentVao:
             selected_indices = np.array(list(selected_nodes), dtype=np.int32)
             colors[selected_indices] = selected_color_arr
 
-        # Set highlight color for nearby node if valid
-        if nearby_node_id >= 0 and nearby_node_id < len(colors):
-            colors[nearby_node_id] = highlight_color_arr
-
         # Set manual color for manual nodes
         if fv.fragment.type == BaseFragment.Type.UMBILICUS:
             colors[fv.manual_point_indices] = manual_color_arr
+
+            # Set highlight color for nearby node if valid
+        if nearby_node_id >= 0 and nearby_node_id < len(colors):
+            colors[nearby_node_id] = highlight_color_arr
 
         # Update the color buffer
         self.color_vbo.bind()
