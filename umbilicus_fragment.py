@@ -20,7 +20,20 @@ class UmbilicusFragment(Fragment):
         self.type = Fragment.Type.UMBILICUS
 
     def createView(self, project_view):
-        return UmbilicusFragmentView(project_view, self)
+        view = UmbilicusFragmentView(project_view, self)
+        # Initialize manual points from loaded points
+        view.manual_points = self.gpoints.copy() if self.gpoints is not None else None
+        view.manual_point_indices = np.arange(len(self.gpoints)) if self.gpoints is not None else np.array([], dtype=np.int32)
+        
+        # Generate interpolated points if we have enough manual points
+        if view.manual_points is not None and len(view.manual_points) >= 2:
+            view.interpolatePoints()
+            if view.interpolated_points is not None and len(view.interpolated_points) > 0:
+                self.gpoints = np.vstack((view.manual_points, view.interpolated_points))
+                # Manual point indices stay as the first N points
+                view.manual_point_indices = np.arange(len(view.manual_points))
+        
+        return view
         
     def meshExportNeedsInfill(self):
         return False # Umbilicus doesn't need infill since it's just a line
@@ -75,6 +88,7 @@ class UmbilicusFragmentView(FragmentView):
         self.segments = None
         self.manual_points = None  # Store original user-placed points
         self.interpolated_points = None  # Store interpolated points
+        self.manual_point_indices = None
         
     def interpolatePoints(self):
         """Create linearly interpolated points between manual points"""
@@ -226,12 +240,17 @@ class UmbilicusFragmentView(FragmentView):
                 print("z_matches", manual_z_matches)
                 self.pushFragmentState()
                 self.manual_points = np.delete(self.manual_points, manual_z_matches, 0)
+                # Update manual point indices after deletion
+                self.manual_point_indices = np.delete(self.manual_point_indices, manual_z_matches, 0)
         
         # Add to manual points array
         if self.manual_points is None:
             self.manual_points = np.reshape(gijk, (1,3))
+            self.manual_point_indices = np.array([0])
         else:
             self.manual_points = np.append(self.manual_points, np.reshape(gijk, (1,3)), axis=0)
+            # Add new index at the end of manual points
+            self.manual_point_indices = np.append(self.manual_point_indices, len(self.manual_points) - 1)
         
         # If we have more than 2 manual points, create interpolated points
         if len(self.manual_points) >= 2:
@@ -239,26 +258,38 @@ class UmbilicusFragmentView(FragmentView):
             if self.interpolated_points is not None and len(self.interpolated_points) > 0:
                 # Update fragment points to include both manual and interpolated points
                 self.fragment.gpoints = np.vstack((self.manual_points, self.interpolated_points))
+                # Update manual point indices to reflect their position in the combined array
+                self.manual_point_indices = np.arange(len(self.manual_points))
         else:
             # Just use manual points if we don't have enough for interpolation
             self.fragment.gpoints = self.manual_points.copy()
+            self.manual_point_indices = np.arange(len(self.manual_points))
         
         self.setLocalPoints(True, False)
         self.fragment.notifyModified()
 
     def setLocalPoints(self, do_update=True, notify=True):
         """Override to handle manual and interpolated points"""
-        super(UmbilicusFragmentView, self).setLocalPoints(do_update, notify, build_kdtrees=False)
-        
         # Initialize manual points from gpoints if not already set
         if self.manual_points is None and len(self.fragment.gpoints) > 0:
             self.manual_points = self.fragment.gpoints.copy()
-            if len(self.manual_points) >= 2:
-                self.interpolatePoints()
-                if self.interpolated_points is not None and len(self.interpolated_points) > 0:
-                    # Update fragment points to include both manual and interpolated points
-                    self.fragment.gpoints = np.vstack((self.manual_points, self.interpolated_points))
-                    super(UmbilicusFragmentView, self).setLocalPoints(do_update, notify)
+        
+        # If we have enough manual points, interpolate
+        if len(self.manual_points) >= 2:
+            self.interpolatePoints()
+            if self.interpolated_points is not None and len(self.interpolated_points) > 0:
+                # Update fragment points to include both manual and interpolated points
+                self.fragment.gpoints = np.vstack((self.manual_points, self.interpolated_points))
+                # Keep track of manual point indices (they're at the start of the array)
+                self.manual_point_indices = np.arange(len(self.manual_points))
+        else:
+            # Just use manual points if we don't have enough for interpolation
+            self.fragment.gpoints = self.manual_points.copy() if self.manual_points is not None else np.array([])
+            # All points are manual points in this case
+            self.manual_point_indices = np.arange(len(self.manual_points)) if self.manual_points is not None else np.array([], dtype=np.int32)
+        
+        # Now call parent's setLocalPoints with updated gpoints
+        super(UmbilicusFragmentView, self).setLocalPoints(do_update, notify, build_kdtrees=False)
 
     def deletePointByIndex(self, index):
         """Override to handle both manual and interpolated points"""
@@ -266,22 +297,30 @@ class UmbilicusFragmentView(FragmentView):
             return
         
         # Find if this point is a manual point
-        if index < len(self.manual_points):
-            # It's a manual point - remove it and reinterpolate
+        if index in self.manual_point_indices:
+            # Get the index in manual_points array
+            manual_index = np.where(self.manual_point_indices == index)[0][0]
+            
+            # Remove it and reinterpolate
             self.pushFragmentState()
-            self.manual_points = np.delete(self.manual_points, index, 0)
+            self.manual_points = np.delete(self.manual_points, manual_index, 0)
+            self.manual_point_indices = np.delete(self.manual_point_indices, manual_index, 0)
             
             # Reinterpolate points if we still have enough manual points
             if len(self.manual_points) >= 2:
                 self.interpolatePoints()
                 if self.interpolated_points is not None and len(self.interpolated_points) > 0:
                     self.fragment.gpoints = np.vstack((self.manual_points, self.interpolated_points))
+                    # Update manual point indices
+                    self.manual_point_indices = np.arange(len(self.manual_points))
                 else:
                     self.fragment.gpoints = self.manual_points.copy()
+                    self.manual_point_indices = np.arange(len(self.manual_points))
             else:
                 # Not enough points for interpolation
                 self.interpolated_points = np.array([])
                 self.fragment.gpoints = self.manual_points.copy()
+                self.manual_point_indices = np.arange(len(self.manual_points))
             
             self.fragment.notifyModified()
             self.setLocalPoints(True, False)

@@ -59,6 +59,7 @@ class DataWindow(QLabel):
         self.mutedNodeColor = ((3*m)//4,0,0,m)
         self.highlightNodeColor = (0,m,m,m)  # Cyan for nearby cursor node
         self.selectedNodeColor = (0,m//2,m,m)  # Lighter blue for selected nodes
+        self.manualNodeColor = (0,m,0,m)  # Green for manual nodes
         self.boundingNodeColor = (m,m//4,m//4,m)
         self.inactiveNodeColor = (m//2,m//4,m//4,m)
         self.triLineColor = (3*m//4,2*m//4,3*m//4,m)

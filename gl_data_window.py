@@ -62,6 +62,7 @@ import ctypes
 def VoidPtr(i):
     return ctypes.c_void_p(i)
 
+from base_fragment import BaseFragment
 from utils import Utils
 from data_window import DataWindow
 
@@ -1811,7 +1812,8 @@ class GLDataWindowChild(QOpenGLWidget):
             color = dw.nodeColor
             highlight_color = dw.highlightNodeColor
             selected_color = dw.selectedNodeColor
-            fvao.updateNodeColors(color, highlight_color, selected_color, nearby_node_id, selected_nodes)
+            manual_color = dw.manualNodeColor
+            fvao.updateNodeColors(color, highlight_color, selected_color, manual_color, nearby_node_id, selected_nodes)
 
             vao = fvao.getVao()
             vao.bind()
@@ -2516,7 +2518,7 @@ class FragmentVao:
         self.color_location = 6
         self.getVao()
 
-    def updateNodeColors(self, default_color, highlight_color, selected_color, nearby_node_id, selected_nodes):
+    def updateNodeColors(self, default_color, highlight_color, selected_color, manual_color, nearby_node_id, selected_nodes):
         """
         Update the color buffer with default colors and highlight the nearby node
         default_color: RGBA color for normal nodes (0-65535 range)
@@ -2534,7 +2536,8 @@ class FragmentVao:
         default_color_arr = np.array(default_color, dtype=np.float32) / 65535.0
         highlight_color_arr = np.array(highlight_color, dtype=np.float32) / 65535.0
         selected_color_arr = np.array(selected_color, dtype=np.float32) / 65535.0
-        
+        manual_color_arr = np.array(manual_color, dtype=np.float32) / 65535.0
+
         # Create array of default colors for all nodes
         colors = np.full((len(fv.vpoints), 4), default_color_arr, dtype=np.float32)
 
@@ -2546,6 +2549,10 @@ class FragmentVao:
         # Set highlight color for nearby node if valid
         if nearby_node_id >= 0 and nearby_node_id < len(colors):
             colors[nearby_node_id] = highlight_color_arr
+
+        # Set manual color for manual nodes
+        if fv.fragment.type == BaseFragment.Type.UMBILICUS:
+            colors[fv.manual_point_indices] = manual_color_arr
 
         # Update the color buffer
         self.color_vbo.bind()
