@@ -887,12 +887,14 @@ fragment_pts_code = {
       #version 410 core
 
       layout(location=6) in vec4 vertex_color;  // New color attribute
+      layout(location=7) in float vertex_size;  // New size attribute
       out vec4 color;
       uniform mat4 xform;
       layout(location=3) in vec3 position;
       void main() {
         color = vertex_color;
         gl_Position = xform*vec4(position, 1.0);
+        gl_PointSize = vertex_size; // set per-vertex point size
       }
     ''',
 
@@ -1668,7 +1670,7 @@ class GLDataWindowChild(QOpenGLWidget):
                 continue
             # self.fragment_trgls_program.setUniformValue("icolor", 1.,0.,0.,1.)
             if fv not in self.fragment_vaos:
-                fvao = FragmentVao(fv, self.position_location, self.normal_location, self.gl)
+                fvao = FragmentVao(fv, self.position_location, self.normal_location, self.gl, self.gldw)
                 self.fragment_vaos[fv] = fvao
             fvao = self.fragment_vaos[fv]
             new_fragment_vaos[fv] = fvao
@@ -1803,7 +1805,7 @@ class GLDataWindowChild(QOpenGLWidget):
             dw.cur_frag_pts_fv.extend([fv]*len(pts))
 
             if fv not in self.fragment_vaos:
-                fvao = FragmentVao(fv, self.position_location, self.normal_location, self.gl)
+                fvao = FragmentVao(fv, self.position_location, self.normal_location, self.gl, self.gldw)
                 self.fragment_vaos[fv] = fvao
             fvao = self.fragment_vaos[fv]
             new_fragment_vaos[fv] = fvao
@@ -2507,15 +2509,17 @@ class UniBuf:
 '''
 
 class FragmentVao:
-    def __init__(self, fragment_view, position_location, normal_location, gl):
+    def __init__(self, fragment_view, position_location, normal_location, gl, gldw, color_location=6, size_location=7):
         self.fragment_view = fragment_view
         self.gl = gl
+        self.gldw = gldw  # Store reference to GLDataWindowChild
         self.vao = None
         self.vao_modified = ""
         self.is_line = False
         self.position_location = position_location
         self.normal_location = normal_location
-        self.color_location = 6
+        self.color_location = color_location
+        self.size_location = size_location
         self.getVao()
 
     def updateNodeColors(self, default_color, highlight_color, selected_color, manual_color, nearby_node_id, selected_nodes):
@@ -2559,6 +2563,33 @@ class FragmentVao:
         nbytes = colors.size * colors.itemsize
         self.color_vbo.allocate(colors, nbytes)
         self.color_vbo.release()
+
+        self.updateNodeSizes()
+
+    def updateNodeSizes(self):
+        fv = self.fragment_view
+        # Access getDrawWidth through gldw
+        normal_size = self.gldw.getDrawWidth("node")  
+        free_size = self.gldw.getDrawWidth("free_node")
+        manual_size = int(normal_size*1.5)
+        print("normal_size", normal_size, "free_size", free_size, "manual_size", manual_size)
+
+        # Create array of default sizes for all nodes
+        sizes = np.full((len(fv.vpoints),), normal_size, dtype=np.float32)
+
+        # If fragment is not mesh_visible (like free nodes), use free_size
+        if not fv.mesh_visible:
+            sizes[:] = free_size
+
+        # For manual nodes, override with manual_size
+        if fv.fragment.type == BaseFragment.Type.UMBILICUS and len(fv.manual_point_indices) > 0:
+            sizes[fv.manual_point_indices] = manual_size
+
+        # Update the size buffer
+        self.size_vbo.bind()
+        nbytes = sizes.size * sizes.itemsize
+        self.size_vbo.allocate(sizes, nbytes)
+        self.size_vbo.release()
 
     def getVao(self):
         fv = self.fragment_view
@@ -2613,6 +2644,29 @@ class FragmentVao:
         )
         self.color_vbo.release()
         f.glEnableVertexAttribArray(self.color_location)
+
+         # New VBO for sizes
+        self.size_vbo = QOpenGLBuffer()
+        self.size_vbo.create()
+        self.size_vbo.bind()
+
+        # Initialize with default sizes (will be updated by updateNodeSizes)
+        default_sizes = np.ones((fv.vpoints.shape[0],), dtype=np.float32)
+        nbytes = default_sizes.size * default_sizes.itemsize
+        self.size_vbo.allocate(default_sizes, nbytes)
+
+        # vertex attrib pointer for size
+        f = self.gl
+        f.glVertexAttribPointer(
+            self.size_location,  # location=7
+            1,  # single float
+            int(pygl.GL_FLOAT),
+            int(pygl.GL_FALSE),
+            0,
+            VoidPtr(0)
+        )
+        self.size_vbo.release()
+        f.glEnableVertexAttribArray(self.size_location)
 
         self.normal_vbo = QOpenGLBuffer()
         self.normal_vbo.create()
