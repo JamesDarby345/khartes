@@ -242,8 +242,8 @@ class BaseFragmentView:
         self.local_points_modified = Utils.timestamp()
         self.normal_offset = 0.
         self.kd_tree = None  # For spatial queries
-        self.k_neighbors = 10   # Default number of neighbors
-        self.current_radius = 10.0  # Default radius in global units
+        self.k_neighbors = 1   # Default number of neighbors
+        self.current_radius = 30.0  # Default radius in global units
         self.selected_nodes = set()  # Store selected node indices
 
     def allowAutoExtrapolation(self):
@@ -525,7 +525,6 @@ class BaseFragmentView:
             radius: Radius to search within (if provided, overrides k)
             use_3d: If True, use spatial distance, otherwise use connectivity
         """
-        print("updateSelectedNodes", point_index, k, radius, "use 3d:", use_3d)
         
         if point_index < 0 or point_index >= len(self.vpoints):
             print("point_index out of range")
@@ -562,7 +561,7 @@ class BaseFragmentView:
             self.selected_nodes = {point_index}
 
             # If steps is 0, we're done - just return the single point
-            steps = radius if radius is not None else (k if k is not None else self.k_neighbors)
+            steps = k if k is not None else self.k_neighbors
             if steps <= 0:
                 return
 
