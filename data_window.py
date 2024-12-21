@@ -13,6 +13,7 @@ from utils import Utils
 from project import ProjectView
 from st import ST
 from uv_mapper import UVMapper
+import pyvista as pv #for quick visualisation checks
 # import PIL
 # import PIL.Image
 
@@ -314,13 +315,19 @@ class DataWindow(QLabel):
             ctrl_pressed = bool(modifiers & Qt.ControlModifier)
             alt_pressed = bool(modifiers & Qt.AltModifier)
 
+            self.window.setLiveZsurfUpdate(False)
+
             if len(fv.selected_nodes) > 0 and index in fv.selected_nodes:
                 indices = np.array(list(fv.selected_nodes.union({index})), dtype=np.int32)
                 old_positions = fv.vpoints[indices, :3]
                 dragged_node_pos = fv.vpoints[index, :3]
                 diffs = old_positions - dragged_node_pos
-
-                if ctrl_pressed:
+                if alt_pressed:
+                    # Alt is pressed: Use sticky move logic
+                    new_positions = self.stickyMove(fv.selected_nodes, old_positions, delta, bbox_size=20)
+                    print("sticky move new_positions", new_positions)
+                    # new_positions = old_positions + delta
+                elif ctrl_pressed:
                     # Ctrl is pressed: Use proportional movement logic
                     dists = np.sqrt((diffs * diffs).sum(axis=1))
                     max_dist = dists.max() if len(dists) > 0 else 1.0
@@ -338,12 +345,14 @@ class DataWindow(QLabel):
                     new_positions = old_positions + delta
 
                 self.setWaitCursor()
-                success = fv.movePoints(indices, new_positions, update_xyz, update_st)
+                success = fv.movePoints(indices, new_positions, update_xyz, update_st=False)
             else:
                 self.setWaitCursor()
                 # No special logic if node isn't in selected nodes or no selection: just move the single node
                 success = self.window.movePoint(fv, index, new_tijk, update_xyz, update_st)
-                
+            
+            self.window.setLiveZsurfUpdate(True)
+
             timer.time("*move point(s)")
             if success:
                 self.window.drawSlices()
@@ -351,6 +360,155 @@ class DataWindow(QLabel):
                 self.updateNearbyNode()
                 timer.time("Update nearby node")
 
+    def stickyMove(self, selected_nodes, old_node_positions, delta, bbox_size=20):
+        """Get volumetric data around selected nodes to guide movement"""
+        from volume_zarr import Loader
+        print("stickyMove")
+        
+        vv = self.volume_view
+        if vv is None or not vv.volume.is_zarr:
+            return old_node_positions
+            
+        current_frag = self.currentFragmentView()
+        if current_frag is None:
+            return old_node_positions
+        
+        # Get node positions and transform to volume coordinates
+        # old_node_positions = current_frag.vpoints[list(selected_nodes), :3]
+        print("old_node_positions", old_node_positions)
+
+        vol_coords = old_node_positions[:, [1,2,0]] # Transform to vol_coords
+        vol_coords_delta = np.array([delta[1], delta[2], delta[0]]) # Transform delta to vol_coords order
+        
+        # Calculate bounding box with padding
+        min_vol_coords = np.floor(np.min(vol_coords, axis=0) - bbox_size).astype(np.int32)
+        max_vol_coords = np.ceil(np.max(vol_coords, axis=0) + bbox_size).astype(np.int32)
+        
+        # Ensure indices are within volume bounds
+        vol_shape = vv.volume.shape
+        min_vol_coords = np.clip(min_vol_coords, 0, [s-1 for s in vol_shape])
+        max_vol_coords = np.clip(max_vol_coords, 0, [s-1 for s in vol_shape])
+
+        print("min_vol_coords", min_vol_coords)
+        print("max_vol_coords", max_vol_coords)
+
+        # Create slices for the full 3D bounding box
+        slices = (
+            slice(min_vol_coords[0], max_vol_coords[0]+1),
+            slice(min_vol_coords[1], max_vol_coords[1]+1),
+            slice(min_vol_coords[2], max_vol_coords[2]+1)
+        )
+        print("slices", slices)
+        
+        # Get the data using the zarr loader
+        if hasattr(vv.volume.levels[0], 'data'):
+            zarr_array = vv.volume.levels[0].data
+            loader = Loader(zarr_array)
+            try:
+                # Get full 3D volume data
+                volume_data = loader[slices]
+            except Exception as e:
+                print(f"Error loading volume data: {e}")
+                return old_node_positions
+                
+            print("volume_data", volume_data.shape, np.unique(volume_data))
+            
+            target_vol_coords = vol_coords + vol_coords_delta
+            
+            # # Create PyVista uniform grid from volume data
+            # grid = pv.ImageData()
+            # grid.dimensions = np.array(volume_data.shape) + 1
+            # grid.origin = min_vol_coords
+            # grid.spacing = (1, 1, 1)
+            
+            # # Add the volume data
+            # grid.cell_data["values"] = volume_data.flatten(order="F")
+            
+            # # Create points for visualization
+            # points = pv.PolyData(vol_coords)
+            # target_points = pv.PolyData(target_vol_coords)
+            
+            # # Create plotter
+            # plotter = pv.Plotter()
+            
+            # # Add volume with proper opacity mapping
+            # plotter.add_volume(grid, 
+            #                  cmap="viridis",
+            #                  opacity="linear", # Linear opacity
+            #                  opacity_unit_distance=3.0, # Controls opacity falloff
+            #                  clim=[0, volume_data.max()],
+            #                  show_scalar_bar=True,
+            #                  scalar_bar_args={'title': 'Volume Values'})
+            
+            # # Add points and connecting lines
+            # plotter.add_mesh(points, color="red", point_size=10, 
+            #                 render_points_as_spheres=True, label="Current")
+            # plotter.add_mesh(target_points, color="blue", point_size=10,
+            #                 render_points_as_spheres=True, label="Target")
+            
+            # # Add lines between current and target positions
+            # for i in range(len(vol_coords)):
+            #     line = pv.Line(vol_coords[i], target_vol_coords[i])
+            #     plotter.add_mesh(line, color="yellow", line_width=2)
+                
+            # plotter.add_legend()
+            # plotter.show()  # This will block until window is closed
+            
+            # Convert positions to volume data coordinates
+            local_coords = vol_coords - min_vol_coords
+            local_targets = target_vol_coords - min_vol_coords
+            
+            # Initialize output positions array
+            new_positions = np.zeros_like(old_node_positions)
+            
+            # Check each node's movement path
+            for i in range(len(local_coords)):
+                start = local_coords[i]
+                end = local_targets[i]
+                
+                # If start point is in non-zero region, keep original position
+                if volume_data[int(start[0]), int(start[1]), int(start[2])] > 0:
+                    new_positions[i] = old_node_positions[i]
+                    continue
+                    
+                # Create vector for ray marching
+                direction = end - start
+                distance = np.linalg.norm(direction)
+                if distance == 0:
+                    new_positions[i] = old_node_positions[i]
+                    continue
+                    
+                direction = direction / distance
+                
+                # Ray march along movement path
+                current_pos = start.copy()
+                step_size = 1.0  # 1 voxel step size
+                steps = int(distance / step_size) + 1
+                
+                intersection_found = False
+                for step in range(steps):
+                    current_pos = start + direction * (step * step_size)
+                    pos_int = np.round(current_pos).astype(int)
+                    
+                    # Check bounds
+                    if (pos_int < 0).any() or (pos_int >= np.array(volume_data.shape)).any():
+                        break
+                        
+                    # Check if we hit non-zero voxel
+                    if volume_data[pos_int[0], pos_int[1], pos_int[2]] > 0:
+                        # Use this position (first position inside the volume)
+                        world_pos = current_pos + min_vol_coords
+                        new_positions[i] = np.array([world_pos[2], world_pos[0], world_pos[1]])  # Convert back to xyz
+                        intersection_found = True
+                        break
+                        
+                if not intersection_found:
+                    # No intersection found, use target position
+                    new_positions[i] = old_node_positions[i] + delta
+                    
+            return new_positions
+
+        return old_node_positions
 
     # return True if nearby node changed, False otherwise
     def setNearbyNode(self, nearbyNode):
@@ -707,7 +865,7 @@ class DataWindow(QLabel):
             if len(zpts) == 0:
                 continue
             # matches = (zpts == ij).all(axis=1).nonzero()[0]
-            matches = ((zpts >= ijl).all(axis=1) & (zpts <= ijg).all(axis=1)).nonzero()[0]
+            matches = ((zpts >= ijl).all(axis=1) & (zpts <= ijg).all(axis=1).nonzero()[0]
             if len(matches) > 0:
                 if not line_found:
                     stxt += "|  "

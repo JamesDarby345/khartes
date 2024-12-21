@@ -366,7 +366,7 @@ class GLSurfaceWindow(DataWindow):
             # Move all points at once if possible
             if hasattr(fv, 'movePoints'):
                 print("movePoints", len(selected_indices))
-                fv.movePoints(selected_indices, selected_nijks, update_xyz, update_st)
+                fv.movePoints(selected_indices, selected_nijks, update_xyz, update_st=False)
             else:
                 # Fallback to individual moves if batch move not available
                 print("falling back to movePoint", len(selected_indices))
