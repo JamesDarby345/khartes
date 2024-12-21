@@ -102,7 +102,8 @@ def create_swiss_roll_obj(values, umbilicus_points=None, direction_extents=None,
     final_t = wraps * 2 * np.pi
 
     # Create z points
-    z_points = np.linspace(z_min, z_max, int((z_max - z_min) / z_step))
+    z_points = np.arange(z_min, z_max + z_step, z_step)
+    print("z_points", z_points)
     
     # If using umbilicus, interpolate x,y positions for each z
     if use_umbilicus and umbilicus_points is not None and len(umbilicus_points) > 1:

@@ -89,6 +89,9 @@ class DataWindow(QLabel):
         self.selection_radius = 0
         self.max_selection_radius = 10000
         self.selected_nodes = set()
+        self.paint_mode = False
+        self.stroke_points = []
+        self.is_painting = False
 
     def getDrawWidth(self, name):
         return self.window.draw_settings[name]["width"]
@@ -324,7 +327,7 @@ class DataWindow(QLabel):
                 diffs = old_positions - dragged_node_pos
                 if alt_pressed:
                     # Alt is pressed: Use sticky move logic
-                    new_positions = self.stickyMove(fv.selected_nodes, old_positions, delta, bbox_size=20)
+                    new_positions = self.stickyMove(old_positions, delta, bbox_size=20)
                     print("sticky move new_positions", new_positions)
                     # new_positions = old_positions + delta
                 elif ctrl_pressed:
@@ -360,10 +363,9 @@ class DataWindow(QLabel):
                 self.updateNearbyNode()
                 timer.time("Update nearby node")
 
-    def stickyMove(self, selected_nodes, old_node_positions, delta, bbox_size=20):
+    def stickyMove(self, old_node_positions, delta, bbox_size=20):
         """Get volumetric data around selected nodes to guide movement"""
         from volume_zarr import Loader
-        print("stickyMove")
         
         vv = self.volume_view
         if vv is None or not vv.volume.is_zarr:
@@ -374,9 +376,6 @@ class DataWindow(QLabel):
             return old_node_positions
         
         # Get node positions and transform to volume coordinates
-        # old_node_positions = current_frag.vpoints[list(selected_nodes), :3]
-        print("old_node_positions", old_node_positions)
-
         vol_coords = old_node_positions[:, [1,2,0]] # Transform to vol_coords
         vol_coords_delta = np.array([delta[1], delta[2], delta[0]]) # Transform delta to vol_coords order
         
@@ -389,16 +388,12 @@ class DataWindow(QLabel):
         min_vol_coords = np.clip(min_vol_coords, 0, [s-1 for s in vol_shape])
         max_vol_coords = np.clip(max_vol_coords, 0, [s-1 for s in vol_shape])
 
-        print("min_vol_coords", min_vol_coords)
-        print("max_vol_coords", max_vol_coords)
-
         # Create slices for the full 3D bounding box
         slices = (
             slice(min_vol_coords[0], max_vol_coords[0]+1),
             slice(min_vol_coords[1], max_vol_coords[1]+1),
             slice(min_vol_coords[2], max_vol_coords[2]+1)
         )
-        print("slices", slices)
         
         # Get the data using the zarr loader
         if hasattr(vv.volume.levels[0], 'data'):
@@ -410,9 +405,7 @@ class DataWindow(QLabel):
             except Exception as e:
                 print(f"Error loading volume data: {e}")
                 return old_node_positions
-                
-            print("volume_data", volume_data.shape, np.unique(volume_data))
-            
+                            
             target_vol_coords = vol_coords + vol_coords_delta
             
             # # Create PyVista uniform grid from volume data
@@ -682,6 +675,15 @@ class DataWindow(QLabel):
         self.window.addPointToCurrentFragment(tijk)
 
     def mousePressEvent(self, e):
+        if self.paint_mode and e.button() == Qt.LeftButton:
+            print("started painting")
+            self.is_painting = True
+            self.stroke_points = []
+            wpos = e.localPos()
+            # Convert window coordinates to data coordinates
+            ij = self.xyToIj((wpos.x(), wpos.y()))
+            self.stroke_points.append(ij)
+            return
         if self.volume_view is None:
             return
         # print("press", e.button())
@@ -1178,13 +1180,11 @@ class DataWindow(QLabel):
             current_radius = getattr(fv, 'current_radius', 10.0)
             scale = 1.5 if fast_mode else 1.1
             new_radius = current_radius * (scale if delta > 0 else 1/scale)
-            print("new_radius, scale, delta, current_radius", new_radius, scale, delta, current_radius)
             fv.current_radius = max(0.1, new_radius)
             fv.updateSelectedNodes(pv.nearby_node_index, radius=fv.current_radius, use_3d=True)
         else:
             # Alt + scroll: adjust k for topological selection
             increment = 10 if fast_mode else 1
-            print("increment", increment, delta)
             if delta > 0:
                 fv.k_neighbors = min(fv.k_neighbors + increment, len(fv.vpoints) - 1)
             else:
@@ -1193,49 +1193,6 @@ class DataWindow(QLabel):
                 
         self.window.drawSlices()
         self.checkCursor()
-
-    def updateNeighborSelection(self):
-        # First check if there's a valid nearby node
-        if self.localNearbyNodeIndex < 0:
-            self.selected_nodes = set()
-            return
-
-        # Add bounds check before accessing cur_frag_pts_fv
-        if self.localNearbyNodeIndex >= len(self.cur_frag_pts_fv):
-            self.selected_nodes = set()
-            return
-
-        # Get fragment view and triangulation
-        fv = self.cur_frag_pts_fv[self.localNearbyNodeIndex]
-        
-        # If the fragment view is None or the triangulation is None, return
-        if fv is None or (not isinstance(fv, TrglFragmentView) and fv.tri is None):
-            return
-
-        # Start with the selected node
-        current_nodes = {self.localNearbyNodeIndex}
-        all_nodes = current_nodes.copy()
-
-        # Expand selection by radius
-        for _ in range(self.selection_radius):
-            next_nodes = set()
-            for node in current_nodes:
-                # Get immediate neighbors through triangles
-                if node >= len(self.cur_frag_pts_xyijk):
-                    continue
-                # Initialize with single integer value
-                neighbors = {int(self.cur_frag_pts_xyijk[node, 5])}
-                for tri in fv.trgls():
-                    if node in tri:
-                        neighbors.update(tri)
-                next_nodes.update(neighbors)
-            current_nodes = next_nodes - all_nodes
-            all_nodes.update(current_nodes)
-            if not current_nodes:
-                break
-
-        self.selected_nodes = all_nodes
-        print("selected_nodes", self.selected_nodes)
 
     # SurfaceWindow subclass overrides this
     # Don't allow it in ordinary slices, because once node moves
@@ -1438,6 +1395,9 @@ class DataWindow(QLabel):
                 self.setWaitCursor()
                 current_frag.reparameterize()
                 self.window.drawSlices()
+        elif e.key() == Qt.Key_P:  # Use 'P' key to toggle paint mode
+            self.togglePaintMode()
+            return
         self.setStatusTextFromMousePosition()
         self.checkCursor()
 
@@ -2458,6 +2418,278 @@ into and out of the viewing plane.
         pixmap = QPixmap.fromImage(qimg)
         self.setPixmap(pixmap)
         timera.time("draw to qt")
+
+    def togglePaintMode(self):
+        self.paint_mode = not self.paint_mode
+        print("paint mode", self.paint_mode)
+        self.checkCursor()
+
+    def mousePressEvent(self, e):
+        if self.paint_mode and e.button() == Qt.LeftButton:
+            print("started painting")
+            self.is_painting = True
+            self.stroke_points = []
+            wpos = e.localPos()
+            # Convert window coordinates to data coordinates
+            ij = self.xyToIj((wpos.x(), wpos.y()))
+            self.stroke_points.append(ij)
+            return
+        
+        if self.volume_view is None:
+            return
+        # print("press", e.button())
+        if e.button() | Qt.LeftButton:
+            modifiers = QApplication.keyboardModifiers()
+            wpos = e.localPos()
+            wxy = (wpos.x(), wpos.y())
+
+            if self.inAddNodeMode():
+                # print('Shift+Click')
+                # ij = self.xyToIj(wxy)
+                # tijk = self.ijToTijk(ij)
+                # tijk = self.xyToTijk(wxy, True)
+                tijk = self.xyToT(wxy)
+                # print("adding point at",tijk)
+                if tijk is not None and self.currentFragmentView() is not None:
+                    self.setWaitCursor()
+                    # self.window.addPointToCurrentFragment(tijk)
+                    self.addPoint(tijk)
+                    # Need to redraw slice before calling
+                    # findNearbyNode, because nodes may have
+                    # been renumbered
+                    self.drawSlice()
+                    # Force window to repaint immediately,
+                    # which in the case of OpenGL windows is necessary
+                    # in order to make sure the deleted node is fully purged
+                    # before findNearbyNode is called
+                    self.repaint()
+                    nearbyNode = self.findNearbyNode(wxy)
+                    if not self.setNearbyNode(nearbyNode):
+                        self.window.drawSlices()
+                
+            else:
+                # print("left mouse button down")
+                self.mouseStartPoint = e.localPos()
+                nearbyNode = self.findNearbyNode(wxy)
+                tiffCorner = self.findNearbyTiffCorner(wxy)
+                '''
+                if nearbyNode < 0 or not self.allowMouseToDragNode():
+                    self.tfStartPoint = self.volume_view.ijktf
+                    self.isPanning = True
+                    self.isMovingNode = False
+                else:
+                    self.nnStartPoint = self.getNearbyNodeIjk()
+                    self.isPanning = False
+                    self.isMovingNode = True
+                '''
+                # self.tfStartPoint = self.volume_view.ijktf
+                self.tfStartPoint = self.computeTfStartPoint()
+                if self.tfStartPoint is None:
+                    return
+                self.isPanning = True
+                self.isMovingNode = False
+                self.isMovingTiff = False
+                if self.allowMouseToDragNode():
+                    if tiffCorner >= 0:
+                        self.ntStartPoint = self.getNearbyTiffIj()
+                        self.isPanning = False
+                        self.isMovingTiff = True
+                    elif nearbyNode >= 0:
+                        self.nnStartPoint = self.getNearbyNodeIjk()
+                        self.isPanning = False
+                        self.isMovingNode = True
+        self.checkCursor()
+
+    def mouseReleaseEvent(self, e):
+        if self.paint_mode and e.button() == Qt.LeftButton:
+            self.is_painting = False
+            if len(self.stroke_points) > 20:
+                print("finished painting", len(self.stroke_points), "points, ", self.stroke_points[:10], self.stroke_points[-10:])
+            else:
+                print("finished painting", self.stroke_points)
+            self.findIntersectingNodes()
+            self.stroke_points = []
+            return
+        
+        if self.volume_view is None:
+            return
+        # print("release", e.button())
+        if e.button() | Qt.LeftButton:
+            self.mouseStartPoint = QPoint()
+            self.tfStartPoint = None
+            self.nnStartPoint = None
+            self.isPanning = False
+            self.isMovingNode = False
+            self.isMovingTiff = False
+            wpos = e.localPos()
+            wxy = (wpos.x(), wpos.y())
+            # nearbyNode = self.findNearbyNode(wxy)
+            # self.setNearbyNode(nearbyNode)
+            self.setNearbyTiffAndNode(wxy)
+        self.checkCursor()
+
+    def mouseMoveEvent(self, e):
+        if self.paint_mode and self.is_painting:
+            wpos = e.localPos()
+            # Convert window coordinates to data coordinates
+            ij = self.xyToIj((wpos.x(), wpos.y()))
+            self.stroke_points.append(ij)
+            return
+        
+        if self.volume_view is None:
+            return
+        mxy = (e.localPos().x(), e.localPos().y())
+        self.setStatusTextFromMousePosition()
+        if self.isPanning:
+            self.window.zarrResetActiveTimer()
+            pos = e.localPos()
+            delta = pos-self.mouseStartPoint
+            dx,dy = delta.x(), delta.y()
+            # print("delta", dx, dy)
+            tf = list(self.tfStartPoint)
+            zoom = self.getZoom()
+            tf[self.iIndex] -= int(dx/zoom)
+            tf[self.jIndex] -= int(dy/zoom)
+            # self.setIjkTf(tf)
+            # self.setIjkOrStxyTf(tf)
+            self.setTf(tf)
+            # self.shiftIjk(-int(dx/zoom), -int(dy/zoom), 0)
+            # self.tfStartPoint = self.volume_view.ijktf
+            # self.mouseStartPoint = pos
+            self.window.drawSlices()
+        elif self.isMovingNode:
+            # print("moving node")
+            if self.nnStartPoint is None:
+                print("nnStartPoint is None while moving node!")
+                return
+            delta = e.localPos()-self.mouseStartPoint
+            dx,dy = delta.x(), delta.y()
+            zoom = self.getZoom()
+            di = int(dx/zoom)
+            dj = int(dy/zoom)
+            nij = list(self.nnStartPoint)
+            nij[0] += di
+            nij[1] += dj
+            self.window.drawSlices()
+            self.setWaitCursor()
+            self.setNearbyNodeIjk(nij, True, True)
+            self.window.drawSlices()
+        elif self.isMovingTiff:
+            if self.ntStartPoint is None:
+                print("ntStartPoint is None while moving node!")
+                return
+            delta = e.localPos()-self.mouseStartPoint
+            dx,dy = delta.x(), delta.y()
+            zoom = self.getZoom()
+            di = int(dx/zoom)
+            dj = int(dy/zoom)
+            nij = list(self.ntStartPoint)
+            nij[0] += di
+            nij[1] += dj
+            self.setNearbyTiffIjk(nij)
+            # self.window.drawSlices()
+        else:
+            mxy = (e.localPos().x(), e.localPos().y())
+            self.setNearbyTiffAndNode(mxy)
+            '''
+            nearbyTiffCorner = self.findNearbyTiffCorner(mxy)
+            self.setNearbyTiff(nearbyTiffCorner)
+            nearbyNode = -1
+            if nearbyTiffCorner < 0:
+                nearbyNode = self.findNearbyNode(mxy)
+            # print("mxy", mxy, nearbyNode)
+            self.setNearbyNode(nearbyNode)
+            '''
+        # ij = self.xyToIj(mxy)
+        # tijk = self.ijToTijk(ij)
+        tijk = self.xyToTijk(mxy, True)
+        # self.window.setCursorPosition(self, tijk)
+        self.setCursorPosition(tijk)
+        self.checkCursor()
+
+#TODO: fix coordinate schemes, x,y on viewed slice vs node global coordinates
+    def findIntersectingNodes(self):
+        if not self.stroke_points:
+            return
+        
+        current_frag = self.currentFragmentView()
+        if not current_frag:
+            return
+        
+        # Convert stroke points to numpy array - they are now in data coordinates
+        stroke = np.array(self.stroke_points)
+        
+        # Get all nodes from current fragment
+        if self.cur_frag_pts_xyijk is None or len(self.cur_frag_pts_xyijk) == 0:
+            return
+        
+        # Get nodes belonging to current fragment
+        frag_indices = [i for i, fv in enumerate(self.cur_frag_pts_fv) if fv == current_frag]
+        if not frag_indices:
+            return
+        
+        frag_nodes = self.cur_frag_pts_xyijk[frag_indices]
+        
+        # For each node, check if it's near any stroke segment
+        intersecting_nodes = set()
+        node_positions = []
+        
+        for i, node in enumerate(frag_nodes):
+            # Get node position in data coordinates (i,j)
+            node_ij = self.tijkToIj(node[2:5])  # Convert from tijk to ij
+            node_ij = np.array(node_ij)
+            
+            # Check distance to each stroke segment
+            for j in range(len(stroke) - 1):
+                p1 = stroke[j]
+                p2 = stroke[j + 1]
+                
+                # Calculate distance from point to line segment
+                d = self.point_to_line_distance(node_ij, p1, p2)
+                
+                # If distance is less than threshold, consider it intersecting
+                # Note: threshold is now in data coordinates, not screen pixels
+                if d < 5:  # Adjust threshold as needed for data coordinate scale
+                    intersecting_nodes.add(int(node[5]))  # Add global node index
+                    node_positions.append((node[2], node[3], node[4]))  # Add ijk position
+                    break
+        
+        if intersecting_nodes:
+            print(f"Intersecting node indices: {sorted(intersecting_nodes)}")
+            print(f"Node positions (ijk): {node_positions}")
+
+    def point_to_line_distance(self, p, a, b):
+        """Calculate distance from point p to line segment ab"""
+        # Convert to numpy arrays
+        p = np.array(p)
+        a = np.array(a)
+        b = np.array(b)
+        
+        # Vector from a to b
+        ab = b - a
+        # Vector from a to p
+        ap = p - a
+        
+        # Length of line segment
+        ab_length = np.linalg.norm(ab)
+        
+        if ab_length == 0:
+            # If a and b are the same point
+            return np.linalg.norm(ap)
+        
+        # Project ap onto ab
+        proj = np.dot(ap, ab) / ab_length
+        
+        if proj <= 0:
+            # p projects outside ab on a's side
+            return np.linalg.norm(ap)
+        elif proj >= ab_length:
+            # p projects outside ab on b's side
+            return np.linalg.norm(p - b)
+        else:
+            # p projects onto ab
+            projection = a + (proj * ab / ab_length)
+            return np.linalg.norm(p - projection)
 
 class SurfaceWindow(DataWindow):
 
