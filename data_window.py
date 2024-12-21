@@ -2614,49 +2614,41 @@ into and out of the viewing plane.
         
         current_frag = self.currentFragmentView()
         if not current_frag:
+            print("current_frag is None")
             return
         
-        # Convert stroke points to numpy array - they are now in data coordinates
+        # if not hasattr(current_frag, 'kdtree') or current_frag.kdtree is None:
+        #     print("Fragment has no kdtree")
+        #     return
+
+        # Convert stroke points to numpy array - they are in data coordinates (i,j)
         stroke = np.array(self.stroke_points)
         
-        # Get all nodes from current fragment
-        if self.cur_frag_pts_xyijk is None or len(self.cur_frag_pts_xyijk) == 0:
-            return
+        # Sample every 2nd point from the stroke to reduce queries
+        stride = 2
+        sampled_points = stroke[::stride]
         
-        # Get nodes belonging to current fragment
-        frag_indices = [i for i, fv in enumerate(self.cur_frag_pts_fv) if fv == current_frag]
-        if not frag_indices:
-            return
+        # Convert sampled ij points to tijk coordinates for kdtree query
+        query_points = np.zeros((len(sampled_points), 3))
+        k = self.positionOnAxis()
+        for i, point in enumerate(sampled_points):
+            tijk = self.ijToTijk(point)
+            query_points[i] = tijk
+
+        print("query points", query_points.shape, query_points[0])
+        global_query_points = self.volume_view.volume.transposedIjksToGlobalPositions(query_points, self.axis)
+        # Use fragment view's selection method
+        radius = 5  # Adjust radius as needed in data coordinates
+        current_frag.updateSelectedNodesFromPoints(global_query_points, radius)
         
-        frag_nodes = self.cur_frag_pts_xyijk[frag_indices]
-        
-        # For each node, check if it's near any stroke segment
-        intersecting_nodes = set()
-        node_positions = []
-        
-        for i, node in enumerate(frag_nodes):
-            # Get node position in data coordinates (i,j)
-            node_ij = self.tijkToIj(node[2:5])  # Convert from tijk to ij
-            node_ij = np.array(node_ij)
-            
-            # Check distance to each stroke segment
-            for j in range(len(stroke) - 1):
-                p1 = stroke[j]
-                p2 = stroke[j + 1]
-                
-                # Calculate distance from point to line segment
-                d = self.point_to_line_distance(node_ij, p1, p2)
-                
-                # If distance is less than threshold, consider it intersecting
-                # Note: threshold is now in data coordinates, not screen pixels
-                if d < 5:  # Adjust threshold as needed for data coordinate scale
-                    intersecting_nodes.add(int(node[5]))  # Add global node index
-                    node_positions.append((node[2], node[3], node[4]))  # Add ijk position
-                    break
-        
-        if intersecting_nodes:
-            print(f"Intersecting node indices: {sorted(intersecting_nodes)}")
+        # Get the selected nodes and their positions for printing
+        if current_frag.selected_nodes:
+            node_indices = sorted(current_frag.selected_nodes)
+            node_positions = [tuple(current_frag.vpoints[idx, :3]) for idx in node_indices]
+            print(f"Intersecting node indices: {node_indices}")
             print(f"Node positions (ijk): {node_positions}")
+        else:
+            print("No intersecting nodes found")
 
     def point_to_line_distance(self, p, a, b):
         """Calculate distance from point p to line segment ab"""

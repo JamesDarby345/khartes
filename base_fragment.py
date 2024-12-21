@@ -581,6 +581,26 @@ class BaseFragmentView:
 
             self.selected_nodes = all_nodes
         
-        print("selected nodes", len(self.selected_nodes))
         # return self.selected_nodes
+
+    def updateSelectedNodesFromPoints(self, points, radius):
+        """
+        Select nodes within radius of any of the given points.
+        Uses KD-tree for efficient spatial queries.
+        
+        Args:
+            points: Array of points in the same coordinate space as the KD-tree
+            radius: Search radius around each point
+        """
+        if self.kd_tree is None:
+            print("KD tree is None")
+            self.selected_nodes = set()
+            return
+        
+        # Query KD-tree for each point
+        self.selected_nodes = set()
+        print("kd tree query", points.shape, points[0], radius)
+        for point in points:
+            indices = self.kd_tree.query_ball_point(point, radius)
+            self.selected_nodes.update(indices)
 
