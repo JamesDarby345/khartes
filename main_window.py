@@ -429,14 +429,19 @@ class RetriangulateButton(QPushButton):
         self.setText("RT")
         self.clicked.connect(self.onButtonClicked)
         self.setToolTip("Prevent retriangulation of the currently active fragment if its 3D")
-        self.setChecked(True)
         
+        # Initialize from draw_settings
+        self.setChecked(self.main_window.draw_settings.get('retriangulate_enabled', True))
+        print("retriangulate_enabled on load", self.main_window.draw_settings['retriangulate_enabled'])
     def onButtonClicked(self, s):
         self.setChecked(not self.checked)
 
     def setChecked(self, flag):
         self.checked = flag
         self.main_window.setRetriangulate(self.checked)
+        # Update draw_settings
+        self.main_window.draw_settings['retriangulate_enabled'] = self.checked
+        self.main_window.settingsSaveDrawSettings()  # Save to QSettings
         if self.checked:
             self.setStyleSheet("QPushButton {padding: 5}")
         else:
@@ -994,6 +999,7 @@ class MainWindow(QMainWindow):
             "cache_directory": "",
             "use_cache_directory": False,
         },
+        "retriangulate_enabled": True,  # Default to enabled
     }
 
     # zarr_signal = Signal(str)
