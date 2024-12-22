@@ -432,7 +432,7 @@ class RetriangulateButton(QPushButton):
         
         # Initialize from draw_settings
         self.setChecked(self.main_window.draw_settings.get('retriangulate_enabled', True))
-        print("retriangulate_enabled on load", self.main_window.draw_settings['retriangulate_enabled'])
+        
     def onButtonClicked(self, s):
         self.setChecked(not self.checked)
 
@@ -941,6 +941,38 @@ class CreateUmbilicusFragmentButton(QPushButton):
         return sb
     '''
 
+class PaintModeButton(QPushButton):
+    def __init__(self, main_window, parent=None):
+        super(PaintModeButton, self).__init__("", parent)
+        self.main_window = main_window
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        self.setStyleSheet("QPushButton {padding: 5}")
+        self.checked = False
+        self.setText("Pt")
+        self.clicked.connect(self.onButtonClicked)
+        self.setToolTip("Toggle paint mode for selecting nodes with strokes")
+        
+        # Initialize from draw_settings
+        self.setChecked(self.main_window.draw_settings.get('paint_mode_enabled', False))
+        
+    def onButtonClicked(self, s):
+        self.setChecked(not self.checked)
+
+    def setChecked(self, flag):
+        self.checked = flag
+        # Update data windows
+        self.main_window.depth.paint_mode = self.checked
+        self.main_window.inline.paint_mode = self.checked
+        self.main_window.xline.paint_mode = self.checked
+        self.main_window.surface.paint_mode = self.checked
+        # Update draw_settings
+        self.main_window.draw_settings['paint_mode_enabled'] = self.checked
+        self.main_window.settingsSaveDrawSettings()  # Save to QSettings
+        if self.checked:
+            self.setStyleSheet("QPushButton { background-color: blue ; padding: 5 }")
+        else:
+            self.setStyleSheet("QPushButton {padding: 5}")
+
 class MainWindow(QMainWindow):
 
     appname = "χάρτης"
@@ -971,8 +1003,9 @@ class MainWindow(QMainWindow):
             "opacity": 1.0,
             "apply_opacity": True,
         },
+        "paint_mode_enabled": False,
         "borders": {
-            "width": 5,
+            "width": 1,
             "opacity": 1.0,
             "apply_opacity": True,
         },
@@ -1037,9 +1070,8 @@ class MainWindow(QMainWindow):
 
         self.draw_settings = copy.deepcopy(MainWindow.draw_settings_defaults)
         self.settingsLoadDrawSettings()
-        # TODO for testing!
-        # self.draw_settings["stream"]["cache_directory"] = ""
-
+        # Store initial retriangulate state to apply when project is loaded
+        self.initial_retriangulate_state = self.draw_settings.get('retriangulate_enabled', True)
         self.draw_settings_widgets = copy.deepcopy(MainWindow.draw_settings_defaults)
 
         # if False, shift lock only requires a single click
@@ -1237,6 +1269,9 @@ class MainWindow(QMainWindow):
 
         self.retriangulate_button = RetriangulateButton(self)
         self.toolbar.addWidget(self.retriangulate_button)
+
+        self.paint_mode_button = PaintModeButton(self)
+        self.toolbar.addWidget(self.paint_mode_button)
 
         self.toggle_direction_action = QAction("Toggle direction", self)
         self.toggle_direction_action.triggered.connect(self.onToggleDirectionButtonClick)
@@ -1549,6 +1584,12 @@ class MainWindow(QMainWindow):
             self.app.restoreOverrideCursor()
             self.drawSlices()
 
+    def togglePaintMode(self):
+        # Get current state from paint mode button
+        current_state = self.paint_mode_button.checked
+        # Toggle state
+        self.paint_mode_button.setChecked(not current_state)
+        
     def setZInterpolation(self, index):
         linear = True
         if index != 0:
@@ -1678,7 +1719,6 @@ class MainWindow(QMainWindow):
                 if not isinstance(widget, QWidget):
                     continue
                 widget.updateValue(value)
-
 
     def addSettingsPanel(self):
         panel = QWidget()
@@ -3520,6 +3560,9 @@ class MainWindow(QMainWindow):
     def setProjectView(self, project_view):
         project_view.project.modified_callback = self.projectModifiedCallback
         self.project_view = project_view
+        if project_view is not None:
+            # Apply initial retriangulate state when project is loaded
+            self.setRetriangulate(self.initial_retriangulate_state)
         self.volumes_model = VolumesModel(project_view, self)
         self.volumes_table.setModel(self.volumes_model)
         self.volumes_table.resizeColumnsToContents()

@@ -2420,8 +2420,7 @@ into and out of the viewing plane.
         timera.time("draw to qt")
 
     def togglePaintMode(self):
-        self.paint_mode = not self.paint_mode
-        print("paint mode", self.paint_mode)
+        self.window.togglePaintMode()
         self.checkCursor()
 
     def mousePressEvent(self, e):

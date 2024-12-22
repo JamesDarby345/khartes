@@ -345,7 +345,7 @@ class SwissRollDialog(QDialog):
         self.setLayout(layout)
     
     def updateTotalPoints(self):
-        total = self.xy_points.value() * (self.z_max.value() - self.z_min.value()) / self.z_step.value()
+        total = self.xy_points.value() * (((self.z_max.value() - self.z_min.value()) / self.z_step.value()) + 1)
         self.total_points_label.setText(str(total))
     
     def getValues(self):
