@@ -419,13 +419,35 @@ class MoveActiveFragmentAlongNormalsButton(QPushButton):
     def onButtonClicked(self, s):
         self.main_window.moveActiveFragmentAlongNormals(self.step)
 
+class RetriangulateButton(QPushButton):
+    def __init__(self, main_window, parent=None):
+        super(RetriangulateButton, self).__init__("", parent)
+        self.main_window = main_window
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        self.setStyleSheet("QPushButton {padding: 5}")
+        self.checked = False
+        self.setText("RT")
+        self.clicked.connect(self.onButtonClicked)
+        self.setToolTip("Prevent retriangulation of the currently active fragment if its 3D")
+        self.setChecked(True)
+        
+    def onButtonClicked(self, s):
+        self.setChecked(not self.checked)
+
+    def setChecked(self, flag):
+        self.checked = flag
+        self.main_window.setRetriangulate(self.checked)
+        if self.checked:
+            self.setStyleSheet("QPushButton {padding: 5}")
+        else:
+            self.setStyleSheet("QPushButton { background-color: red ; padding: 5 }")
+
 class LiveZsurfUpdateButton(QPushButton):
     def __init__(self, main_window, parent=None):
         super(LiveZsurfUpdateButton, self).__init__("", parent)
         self.main_window = main_window
         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
         self.setStyleSheet("QPushButton {padding: 5}")
-        # self.setCheckable(True)
         self.checked = False
         self.setText("LU")
         self.clicked.connect(self.onButtonClicked)
@@ -1207,6 +1229,9 @@ class MainWindow(QMainWindow):
         self.live_zsurf_update_button = LiveZsurfUpdateButton(self)
         self.toolbar.addWidget(self.live_zsurf_update_button)
 
+        self.retriangulate_button = RetriangulateButton(self)
+        self.toolbar.addWidget(self.retriangulate_button)
+
         self.toggle_direction_action = QAction("Toggle direction", self)
         self.toggle_direction_action.triggered.connect(self.onToggleDirectionButtonClick)
         self.next_volume_action = QAction("Next volume", self)
@@ -1257,6 +1282,17 @@ class MainWindow(QMainWindow):
             self.raise_()
             self.setFocus()
     '''
+
+    def setRetriangulate(self, flag):
+        """Set retriangulation flag for all 3D fragments in the project"""
+        pv = self.project_view
+        if pv is None:
+            return
+            
+        for fv in pv.fragments.values():
+            # Only set flag on TrglFragmentViews (3D fragments)
+            if hasattr(fv, 'retriangulate_enabled'):
+                fv.retriangulate_enabled = flag
 
     def setCursorPosition(self, data_window, tijk, stxyz=None):
         # show_tracking_cursors = self.draw_settings["tracking_cursors"]["show"]
@@ -1909,7 +1945,6 @@ class MainWindow(QMainWindow):
         pv = self.project_view
         active = False
         if pv is not None:
-            # active = (len(pv.activeFragmentViews(unaligned_ok=True)) > 0)
             active = (pv.mainActiveFragmentView(unaligned_ok=True) is not None)
         self.export_mesh_action.setEnabled(active)
         self.copy_frag.setEnabled(active)
@@ -3460,6 +3495,7 @@ class MainWindow(QMainWindow):
             self.setOverlay(i, None, no_notify=True)
         self.live_zsurf_update = True
         self.live_zsurf_update_button.setChecked(self.live_zsurf_update)
+        self.retriangulate_button.setChecked(True)
         self.setFragments()
         self.project_view = None
         self.volumes_model = VolumesModel(None, self)

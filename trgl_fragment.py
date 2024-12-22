@@ -527,6 +527,7 @@ class TrglFragmentView(BaseFragmentView):
         self.normal_offset = 0.
         # self.half_width_multiplier = 10
         self.half_width_multiplier = 5
+        self.retriangulate_enabled = True
         if len(trgl_fragment.trgls) == 0:
             self.mesh_visible = False
 
@@ -1188,7 +1189,6 @@ class TrglFragmentView(BaseFragmentView):
         return constrained
 
     def movePoint(self, index, new_vijk, update_xyz, update_st):
-        # print("mp")
         timer = Utils.Timer()
         timer.active = False
         vv = self.cur_volume_view
@@ -1197,19 +1197,15 @@ class TrglFragmentView(BaseFragmentView):
         old_vijk = self.vpoints[index, :3]
         old_uijk = vv.transposedIjkToIjk(old_vijk)
         duijk = [new_uijk[i]-old_uijk[i] for i in range(3)]
-        # print("movePoint", dvijk, dgijk, duijk)
-        # print("a")
         axes = self.localStAxes(index)
-        # print("b")
+        
         if axes is None:
             print("TrglFragmentView.movePoint: could not compute axes")
             axes = np.zeros((3,3), dtype=np.float64)
-            # return
+            
         rduijk = (axes.T)@duijk
         old_stxy = self.all_stpoints[index]
         new_stxy = old_stxy+rduijk[:2]
-        # print(self.fragment.gpoints)
-        # print(match, new_gijk)
 
         if update_st and (new_stxy != old_stxy).all() and self.pointExists(new_stxy):
             print("move: point already exists")
@@ -1217,21 +1213,17 @@ class TrglFragmentView(BaseFragmentView):
 
         timer.time("startup")
 
-        if update_st:
+        # Only do triangulation-related work if retriangulation is enabled
+        if update_st and self.retriangulate_enabled:
             mel = self.maxStEdgeLengthAroundPoint(index)
             half_width = self.half_width_multiplier*self.avg_st_len
-            # print(mel, half_width)
             half_width = max(half_width, 2.*mel)
             ops = TrglPointSet(self.all_stpoints, len(self.stpoints), new_stxy, half_width)
-            # measure osqcm before gpoints is modified (below)
             osqcm = self.calculateSqCmOfTrgls(ops.triangulate())
 
         if update_xyz:
             self.fragment.gpoints[index, :] = new_gijk
-            # print("c")
-            # self.setLocalPoints(True, False)
             self.setLocalPoint(index)
-            # print("d")
             timer.time("update xyz")
 
         if update_st:
@@ -1239,24 +1231,26 @@ class TrglFragmentView(BaseFragmentView):
             self.all_stpoints[index, :] = new_stxy
             uv = self.stxyToUv(new_stxy)
             self.fragment.gtpoints[index, :] = uv
-            # self.stpoints[index, :] = new_stxy
             timer.time("set up update_st")
-            constrained = self.adjustStPoints(index, half_width)
-            timer.time("adjust st points")
 
-            nps = TrglPointSet(self.all_stpoints, len(self.stpoints), new_stxy, half_width)
-            nsqcm = self.calculateSqCmOfTrgls(nps.triangulate())
-            dsqcm = nsqcm-osqcm
-            # print("dsqcm", self.sqcm+dsqcm, dsqcm)
-            self.sqcm += dsqcm
-            # print(self.sqcm, self.calculateSqCmOfTrgls(self.trgls()))
-            self.applyTrglDiff(ops, nps)
-            timer.time("apply diff")
-            if not constrained:
-                # self.stpoints = None
-                # self.setLocalPoints(True, False)
-                self.rebuildStPoints()
-                timer.time("rebuild st points")
+            if self.retriangulate_enabled:
+                constrained = self.adjustStPoints(index, half_width)
+                timer.time("adjust st points")
+
+                nps = TrglPointSet(self.all_stpoints, len(self.stpoints), new_stxy, half_width)
+                nsqcm = self.calculateSqCmOfTrgls(nps.triangulate())
+                dsqcm = nsqcm-osqcm
+                self.sqcm += dsqcm
+                self.applyTrglDiff(ops, nps)
+                timer.time("apply diff")
+                
+                if not constrained:
+                    self.rebuildStPoints()
+                    timer.time("rebuild st points")
+            else:
+                # Use the simpler area calculation like in movePoints
+                old_sqcm = self.calculateSqCmOfTrgls(self.trgls())
+                self.sqcm = old_sqcm
 
         self.fragment.notifyModified()
         return True
