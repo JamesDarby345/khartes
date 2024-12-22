@@ -2195,6 +2195,8 @@ class MainWindow(QMainWindow):
         dialog.setActiveFragment(self.project_view.mainActiveFragmentView())
         if dialog.exec_() == QDialog.Accepted:
             values = dialog.getValues()
+            umbilicus_points = dialog.getUmbilicusPoints()
+            
             # Calculate directional extents if using mask
             if values['use_mask']:
                 directional_extents = calculate_direction_extents(
@@ -2207,8 +2209,16 @@ class MainWindow(QMainWindow):
                 width = values['total_width']
                 directional_extents = [width/2] * values['num_directions']
                 
-            filename = create_swiss_roll_obj(values, dialog.getUmbilicusPoints(), directional_extents)
-            self.loadObjFile(filename)
+            filename = create_swiss_roll_obj(values, umbilicus_points, directional_extents)
+            
+            # Store both points per wrap and umbilicus points if they were used
+            params = {
+                'pts_per_wrap': values['xy_points'] // values['wraps']
+            }
+            if umbilicus_points is not None and len(umbilicus_points) > 0:
+                params['umbilicus_points'] = umbilicus_points
+                
+            self.loadObjFile(filename, params)
 
     def reparameterizeActiveFragment(self):
         pv = self.project_view
@@ -2846,11 +2856,14 @@ class MainWindow(QMainWindow):
 
     
 
-    def loadObjFile(self, fname):
+    def loadObjFile(self, fname, params=None):
         trgl_frags = TrglFragment.load(fname)
         if trgl_frags is None or len(trgl_frags) == 0:
             return
         trgl_frag = trgl_frags[0]
+        if params is not None:
+            trgl_frag.params.update(params)
+        print("params", trgl_frag.params)
         pv = self.project_view
         proj = pv.project
         self.fragments_table.model().beginResetModel()

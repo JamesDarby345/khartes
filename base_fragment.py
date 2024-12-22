@@ -533,7 +533,7 @@ class BaseFragmentView:
 
         if use_3d:
             # Use KDTree for spatial queries
-            if self.kd_tree is None:
+            if not hasattr(self, 'kd_tree') or self.kd_tree is None:
                 print("KD tree is None")
                 self.selected_nodes = set()
                 return
@@ -552,7 +552,7 @@ class BaseFragmentView:
                 self.selected_nodes = set(indices.tolist())
         else:
             # Use adjacency list for connectivity-based queries
-            if self.adjacency_list is None:
+            if not hasattr(self, 'adjacency_list') or self.adjacency_list is None:
                 print("Adjacency list is None")
                 self.selected_nodes = set()
                 return

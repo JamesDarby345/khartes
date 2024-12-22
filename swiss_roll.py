@@ -312,7 +312,7 @@ class SwissRollDialog(QDialog):
         extents_layout.addWidget(QLabel("Number of Direction Extents:"))
         self.num_directions = QSpinBox()
         self.num_directions.setRange(4, 10000)  
-        self.num_directions.setValue(64)  # Default value
+        self.num_directions.setValue(128)  # Default value
         self.num_directions.setMinimumWidth(100)
         self.num_directions.setToolTip("Number of radial directions to sample for mask constraints")
         extents_layout.addWidget(self.num_directions)

@@ -2645,8 +2645,8 @@ into and out of the viewing plane.
         if current_frag.selected_nodes:
             node_indices = sorted(current_frag.selected_nodes)
             node_positions = [tuple(current_frag.vpoints[idx, :3]) for idx in node_indices]
-            print(f"Intersecting node indices: {node_indices}")
-            print(f"Node positions (ijk): {node_positions}")
+            print(f"Intersecting node indices: {len(node_indices)}, {node_indices[0]}")
+            print(f"Node positions (ijk): {len(node_positions)}, {node_positions[0]}")
         else:
             print("No intersecting nodes found")
 
