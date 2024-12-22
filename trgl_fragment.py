@@ -75,6 +75,8 @@ class TrglFragment(BaseFragment):
         self.trgls = np.zeros((0,3), dtype=np.int32)
         self.direction = 0
         self.params = {}
+        self.pts_per_wrap = None
+        self.umbilicus_points = None
         self.type = BaseFragment.Type.TRGL_FRAGMENT
         
     @staticmethod
@@ -1718,6 +1720,86 @@ class TrglFragmentView(BaseFragmentView):
                 trgl_stack.append(neigh)
             # print("ts", len(trgl_stack))
         return out_trgls
+    
+    def findDominantWrap2D(self):
+        """
+        For selected nodes, finds connected nodes at the same z-level.
+        Returns the largest group that contains the most selected nodes.
+        
+        Returns:
+            set: The set of node indices forming the largest connected group
+                 at the same z-level, or None if requirements aren't met
+        """
+        # Check if we have the required parameters
+        if not hasattr(self.fragment, 'pts_per_wrap') or self.fragment.pts_per_wrap is None:
+            print("Missing pts_per_wrap")
+            return None
+        
+        if not hasattr(self, 'selected_nodes') or not self.selected_nodes:
+            print("no selected_nodes")
+            return None
+
+        if not hasattr(self, 'adjacency_list') or self.adjacency_list is None:
+            print("no adjacency_list")
+            return None
+
+        # Get points per wrap divided by 1.5
+        target_adjacent = int(self.fragment.pts_per_wrap / 1.5)
+        print("pts_per_wrap", self.fragment.pts_per_wrap)
+        print("target_adjacent", target_adjacent)
+        
+        # Group selected nodes by z-value
+        z_groups = {}
+        for node in self.selected_nodes:
+            z_val = round(self.fragment.gpoints[node][2], 2)  # Round to handle floating point
+            if z_val not in z_groups:
+                z_groups[z_val] = set()
+            z_groups[z_val].add(node)
+        
+        best_group = None
+        max_selected = 0
+        
+        # For each z-level that contains selected nodes
+        for z_val, selected_at_z in z_groups.items():
+            # Find all nodes at this z-level
+            nodes_at_z = set()
+            for i, pt in enumerate(self.fragment.gpoints):
+                if round(pt[2], 2) == z_val:
+                    nodes_at_z.add(i)
+                    
+            # Find connected components at this z-level using adjacency list
+            components = []
+            remaining = nodes_at_z.copy()
+            
+            while remaining:
+                start = remaining.pop()
+                component = {start}
+                stack = [start]
+                
+                # Flood fill using adjacency list
+                while stack:
+                    current = stack.pop()
+                    # Get neighbors directly from adjacency list
+                    for neighbor in self.adjacency_list[current]:
+                        if neighbor in remaining and neighbor in nodes_at_z:
+                            remaining.remove(neighbor)
+                            component.add(neighbor)
+                            stack.append(neighbor)
+                
+                components.append(component)
+            
+            # Find component with most selected nodes that has enough adjacent points
+            for component in components:
+                if len(component) >= target_adjacent:
+                    selected_count = len(component & selected_at_z)
+                    if selected_count > max_selected:
+                        max_selected = selected_count
+                        best_group = component
+        
+        print("best_group", len(best_group))
+        self.selected_nodes = best_group
+        return best_group
+
 
 
 class TrglPointSet:
@@ -2109,4 +2191,3 @@ class TrglPointSet:
         '''
         timer.time("  z")
         return inds, adjusted_sts, len(bpts) > 1
-

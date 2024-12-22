@@ -8,6 +8,7 @@ import numpy as np
 import numpy.linalg as npla
 import cv2
 
+from base_fragment import BaseFragment
 from trgl_fragment import TrglFragmentView
 from utils import Utils
 from project import ProjectView
@@ -2606,7 +2607,6 @@ into and out of the viewing plane.
         self.setCursorPosition(tijk)
         self.checkCursor()
 
-#TODO: fix coordinate schemes, x,y on viewed slice vs node global coordinates
     def findIntersectingNodes(self):
         if not self.stroke_points:
             return
@@ -2615,10 +2615,6 @@ into and out of the viewing plane.
         if not current_frag:
             print("current_frag is None")
             return
-        
-        # if not hasattr(current_frag, 'kdtree') or current_frag.kdtree is None:
-        #     print("Fragment has no kdtree")
-        #     return
 
         # Convert stroke points to numpy array - they are in data coordinates (i,j)
         stroke = np.array(self.stroke_points)
@@ -2648,6 +2644,15 @@ into and out of the viewing plane.
             print(f"Node positions (ijk): {len(node_positions)}, {node_positions[0]}")
         else:
             print("No intersecting nodes found")
+
+        #Do additional brush logic here
+        #uses the selected nodes to find the dominant wrap in that selection
+        #the nodes that are in that wrap
+        print("current_frag", current_frag)
+        if current_frag.fragment.type == BaseFragment.Type.TRGL_FRAGMENT:
+            current_frag.findDominantWrap2D()
+
+                    
 
     def point_to_line_distance(self, p, a, b):
         """Calculate distance from point p to line segment ab"""
