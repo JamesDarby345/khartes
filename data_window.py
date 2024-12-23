@@ -1292,7 +1292,8 @@ class DataWindow(QLabel):
                     nij[2] -= d[2]
                     self.setWaitCursor()
                     self.setNearbyNodeIjk(nij, True, not alt_pressed)
-        elif not self.isMovingNode and (key == Qt.Key_5 or key == Qt.Key_Delete):
+        # elif not self.isMovingNode and (key == Qt.Key_5 or key == Qt.Key_Delete):
+        elif not self.isMovingNode and key in [Qt.Key_5, Qt.Key_Delete, Qt.Key_Backspace]:
             # print("backspace/delete")
             # ijk = self.getNearbyNodeIjk()
             # if ijk is None:

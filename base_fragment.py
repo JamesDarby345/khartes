@@ -4,6 +4,7 @@ import numpy as np
 from scipy.spatial import KDTree
 from enum import Enum
 from PyQt5.QtGui import QColor
+import json
 
 class BaseFragment:
     class Type(Enum):
@@ -324,6 +325,9 @@ class BaseFragmentView:
         return
 
     def reparameterize(self):
+        return
+    
+    def fragFromDict(self):
         return
 
     # direction is not used here, but this notifies fragment view

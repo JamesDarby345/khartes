@@ -2942,9 +2942,11 @@ class MainWindow(QMainWindow):
             return
         trgl_frag = trgl_frags[0]
         if params is not None:
-            trgl_frag.pts_per_wrap = params.get('pts_per_wrap')
-            trgl_frag.umbilicus_points = params.get('umbilicus_points')
-        
+            if hasattr(trgl_frag, "params") and trgl_frag.params is not None:
+                trgl_frag.params.update(params)
+            else:
+                trgl_frag.params = params
+        print("params in load Obj File", trgl_frag.params)
         pv = self.project_view
         proj = pv.project
         self.fragments_table.model().beginResetModel()
