@@ -465,7 +465,15 @@ class TrglFragment(BaseFragment):
         info['modified'] = self.modified
         info['color'] = self.color.name()
         info['type'] = self.type.value if self.type else Fragment.Type.TRGL_FRAGMENT.value
-        info['params'] = self.params
+        
+        # Convert any NumPy arrays in params to lists
+        params = {}
+        for key, value in self.params.items():
+            if isinstance(value, np.ndarray):
+                params[key] = value.tolist()
+            else:
+                params[key] = value
+        info['params'] = params
         info['obj_path'] = str(self.obj_path) if self.obj_path else None
         # Don't save gpoints/trgls in JSON as they're in the OBJ file
         return info
