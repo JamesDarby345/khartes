@@ -694,19 +694,10 @@ class Project:
             if ppm is not None and ppm.valid:
                 prj.addPpm(ppm)
 
-        for ffile in fdir.glob("*.json"):
-            frags = Fragment.load(ffile)
-            if frags is not None:
-                for frag in frags:
-                    if frag.valid:
-                        prj.addFragment(frag)
-
-        for ffile in fdir.glob("*.obj"):
-            frags = TrglFragment.load(ffile)
-            if frags is not None:
-                for frag in frags:
-                    if frag.valid:
-                        prj.addFragment(frag)
+        # Load all fragments using the new method
+        fragments = prj.loadAllFragments(fdir)
+        for frag in fragments:
+            prj.addFragment(frag)
 
         return prj
 
@@ -842,9 +833,22 @@ class Project:
             
             # Get the fragment type
             frag_type = frag.type
+            if frag_type == Fragment.Type.TRGL_FRAGMENT:
+                # Create a proper path for the OBJ file using the fragment's timestamp
+                cfixed = Utils.timestampToVc(frag.created)
+                if cfixed is None:
+                    print("Could not convert created timestamp", frag.created, "to vc")
+                    cfixed = frag.created.replace(':',"_").replace('.',"p")
+                obj_path = path / cfixed
+                # Save the OBJ file
+                frag.save(obj_path)
+                # Store the path for JSON reference
+                frag.obj_path = obj_path.with_suffix(".obj")
+                
             if frag_type not in fragment_groups:
                 fragment_groups[frag_type] = []
             fragment_groups[frag_type].append(frag.toDict())
+            
         
         # Save each group to its respective file
         type_to_file = {
