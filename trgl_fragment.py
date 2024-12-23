@@ -1837,19 +1837,17 @@ class TrglFragmentView(BaseFragmentView):
     
     def findDominantWrap2D(self):
         """
-        For selected nodes, finds connected nodes at the same z-level.
-        Returns the largest group that contains the most selected nodes.
+        For each selected node, finds its adjacent nodes at the same z-level.
+        Returns the group that contains the most selected nodes.
         
         Returns:
-            set: The set of node indices forming the largest connected group
-                 at the same z-level, or None if requirements aren't met
+            set: The set of node indices forming the largest group containing selected nodes
         """
         # Check if we have the required parameters
         if not hasattr(self.fragment, 'params') or self.fragment.params is None:
             print("Missing params")
             return None
         
-        # print("params in findDominantWrap2D", self.fragment.params)
         if 'pts_per_wrap' not in self.fragment.params or self.fragment.params['pts_per_wrap'] is None:
             print("Missing pts_per_wrap")
             return None
@@ -1861,63 +1859,58 @@ class TrglFragmentView(BaseFragmentView):
         if not hasattr(self, 'adjacency_list') or self.adjacency_list is None:
             print("no adjacency_list")
             return None
-        # print("params", self.fragment.params)
-        # Get points per wrap divided by 1.5
+
+        # Get target number of adjacent points
         target_adjacent = int(self.fragment.params['pts_per_wrap'] / 1.5)
         print("pts_per_wrap", self.fragment.params['pts_per_wrap'])
         print("target_adjacent", target_adjacent)
         
-        # Group selected nodes by z-value
-        z_groups = {}
-        for node in self.selected_nodes:
-            z_val = round(self.fragment.gpoints[node][2], 2)  # Round to handle floating point
-            if z_val not in z_groups:
-                z_groups[z_val] = set()
-            z_groups[z_val].add(node)
+        # For each selected node, find its group of adjacent nodes at the same z-level
+        groups = []
+        for start_node in self.selected_nodes:
+            # Get z-value of the start node
+            start_z = round(self.fragment.gpoints[start_node][2], 2)
+            
+            # Find all connected nodes at the same z-level using BFS
+            group = {start_node}
+            queue = [start_node]
+            visited = {start_node}
+            
+            while queue and len(group) < target_adjacent:
+                current = queue.pop(0)
+                
+                # Check each neighbor
+                for neighbor in self.adjacency_list[current]:
+                    if neighbor not in visited:
+                        visited.add(neighbor)
+                        # Check if neighbor is at same z-level
+                        neighbor_z = round(self.fragment.gpoints[neighbor][2], 2)
+                        if neighbor_z == start_z:
+                            group.add(neighbor)
+                            queue.append(neighbor)
+                            if len(group) >= target_adjacent:
+                                break
+            
+            if len(group) >= target_adjacent:
+                groups.append(group)
         
+        # Find the group that contains the most originally selected nodes
         best_group = None
         max_selected = 0
         
-        # For each z-level that contains selected nodes
-        for z_val, selected_at_z in z_groups.items():
-            # Find all nodes at this z-level
-            nodes_at_z = set()
-            for i, pt in enumerate(self.fragment.gpoints):
-                if round(pt[2], 2) == z_val:
-                    nodes_at_z.add(i)
-                    
-            # Find connected components at this z-level using adjacency list
-            components = []
-            remaining = nodes_at_z.copy()
-            
-            while remaining:
-                start = remaining.pop()
-                component = {start}
-                stack = [start]
-                
-                # Flood fill using adjacency list
-                while stack:
-                    current = stack.pop()
-                    # Get neighbors directly from adjacency list
-                    for neighbor in self.adjacency_list[current]:
-                        if neighbor in remaining and neighbor in nodes_at_z:
-                            remaining.remove(neighbor)
-                            component.add(neighbor)
-                            stack.append(neighbor)
-                
-                components.append(component)
-            
-            # Find component with most selected nodes that has enough adjacent points
-            for component in components:
-                if len(component) >= target_adjacent:
-                    selected_count = len(component & selected_at_z)
-                    if selected_count > max_selected:
-                        max_selected = selected_count
-                        best_group = component
+        for group in groups:
+            selected_count = len(group & self.selected_nodes)
+            if selected_count > max_selected:
+                max_selected = selected_count
+                best_group = group
         
-        print("best_group", len(best_group))
-        self.selected_nodes = best_group
-        return best_group
+        if best_group is not None:
+            print("best_group size:", len(best_group))
+            print("contains selected nodes:", len(best_group & self.selected_nodes))
+            self.selected_nodes = best_group
+            return best_group
+            
+        return None
 
 
 
