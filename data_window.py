@@ -1,6 +1,7 @@
 from PyQt5.QtGui import (
         QColor, QCursor, QFont, 
         QGuiApplication, QImage, QPalette, QPixmap,
+        QPainter, QPen
         )
 from PyQt5.QtWidgets import QLabel, QApplication
 from PyQt5.QtCore import QPoint, Qt
@@ -93,6 +94,20 @@ class DataWindow(QLabel):
         self.paint_mode = False
         self.stroke_points = []
         self.is_painting = False
+
+        self.paint_cursor_radius = 5  # Add default radius
+        self.createPaintCursor()  # Move cursor creation to separate method
+
+    def createPaintCursor(self):
+        # Create a custom paint cursor with the current radius
+        size = self.paint_cursor_radius * 2 + 1  # Diameter plus center pixel
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setPen(QPen(Qt.black))
+        painter.drawEllipse(1, 1, size-2, size-2)  # Draw circle with 1px border
+        painter.end()
+        self.paintCursor = QCursor(pixmap, self.paint_cursor_radius, self.paint_cursor_radius)
 
     def getDrawWidth(self, name):
         return self.window.draw_settings[name]["width"]
@@ -781,36 +796,35 @@ class DataWindow(QLabel):
         self.checkCursor()
 
     def checkCursor(self):
-        # if leaving:
-        #     self.unsetCursor()
-        #     return
-        new_cursor = self.defaultCursor
-        if self.isPanning:
-            new_cursor = self.panningCursor
-        elif self.inAddNodeMode():
-            if self.bounding_nodes is not None:
-                new_cursor = self.interpolatingCursor
-            else:
-                new_cursor = self.addingCursor
-        # elif self.allowMouseToDragNode() and (self.isMovingNode or self.localNearbyNodeIndex >= 0):
-        elif self.allowMouseToDragNode() and self.localNearbyNodeIndex >= 0:
-            new_cursor = self.movingNodeCursor
-        elif self.allowMouseToDragNode() and self.nearby_tiff_corner >= 0:
-            c = self.nearby_tiff_corner
-            if c == 0 or c == 3:
-                new_cursor = self.upperLeftCursor
-            else:
-                new_cursor = self.upperRightCursor
-        elif not self.allowMouseToDragNode() and self.localNearbyNodeIndex >= 0:
-            cursors = self.nearNonMovingNodeCursors
-            cursor = self.nearNonMovingNodeCursor
-            if len(cursors) == 0:
-                new_cursor = cursor
-            else:
-                pdist = self.nearbyNodeDistance/self.maxNearbyNodeDistance
-                rdist = min(2.-2*pdist, 1)
-                index = round((len(cursors)-1)*rdist)
-                new_cursor = cursors[index]
+        if self.paint_mode:
+            new_cursor = self.paintCursor
+        else:
+            new_cursor = self.defaultCursor
+            if self.isPanning:
+                new_cursor = self.panningCursor
+            elif self.inAddNodeMode():
+                if self.bounding_nodes is not None:
+                    new_cursor = self.interpolatingCursor
+                else:
+                    new_cursor = self.addingCursor
+            elif self.allowMouseToDragNode() and self.localNearbyNodeIndex >= 0:
+                new_cursor = self.movingNodeCursor
+            elif self.allowMouseToDragNode() and self.nearby_tiff_corner >= 0:
+                c = self.nearby_tiff_corner
+                if c == 0 or c == 3:
+                    new_cursor = self.upperLeftCursor
+                else:
+                    new_cursor = self.upperRightCursor
+            elif not self.allowMouseToDragNode() and self.localNearbyNodeIndex >= 0:
+                cursors = self.nearNonMovingNodeCursors
+                cursor = self.nearNonMovingNodeCursor
+                if len(cursors) == 0:
+                    new_cursor = cursor
+                else:
+                    pdist = self.nearbyNodeDistance/self.maxNearbyNodeDistance
+                    rdist = min(2.-2*pdist, 1)
+                    index = round((len(cursors)-1)*rdist)
+                    new_cursor = cursors[index]
 
         if new_cursor != self.cursor():
             self.setCursor(new_cursor)
@@ -1154,7 +1168,17 @@ class DataWindow(QLabel):
         use_radius = bool(modifiers & Qt.ControlModifier) 
         fast_mode = bool(modifiers & Qt.MetaModifier) #Meta (Command/Windows key)
 
-        if not (use_neighbors or use_radius):
+        # Handle paint mode cursor radius adjustment
+        if self.paint_mode and not (use_neighbors or use_radius):
+            if delta > 0:
+                self.paint_cursor_radius = min(50, self.paint_cursor_radius + 1)  # Cap at 50px
+            else:
+                self.paint_cursor_radius = max(1, self.paint_cursor_radius - 1)  # Minimum 1px
+            self.createPaintCursor()
+            self.checkCursor()
+            return
+        
+        if not (use_neighbors or use_radius) or (self.paint_mode and (use_neighbors or use_radius)):
             # Default zoom behavior
             self.setStatusTextFromMousePosition()
             z = self.volume_view.zoom
@@ -2621,7 +2645,8 @@ into and out of the viewing plane.
         stroke = np.array(self.stroke_points)
         
         # Sample every 2nd point from the stroke to reduce queries
-        stride = 2
+        # this is not a good idea, because it can miss nodes, sample all
+        stride = 1
         sampled_points = stroke[::stride]
         
         # Convert sampled ij points to tijk coordinates for kdtree query
@@ -2633,9 +2658,8 @@ into and out of the viewing plane.
 
         print("query points", query_points.shape, query_points[0])
         global_query_points = self.volume_view.volume.transposedIjksToGlobalPositions(query_points, self.axis)
-        # Use fragment view's selection method
-        radius = 5  # Adjust radius as needed in data coordinates
-        current_frag.updateSelectedNodesFromPoints(global_query_points, radius)
+        # Use paint cursor radius for kdtree search
+        current_frag.updateSelectedNodesFromPoints(global_query_points, self.paint_cursor_radius)
         
         # Get the selected nodes and their positions for printing
         if current_frag.selected_nodes:
