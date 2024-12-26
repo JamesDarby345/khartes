@@ -1835,6 +1835,111 @@ class TrglFragmentView(BaseFragmentView):
             # print("ts", len(trgl_stack))
         return out_trgls
     
+    #TODO: very buggy
+    def findNodesInBrushArc(self, brush_points, brush_radius, z_val):
+        """
+        Finds nodes in self.selected_nodes that lie within the 'pizza slice' arc
+        defined by the brush stroke around the umbilicus point.
+
+        Args:
+            brush_points (array-like): 2D array of (x, y) points from the brush stroke
+            brush_radius (float):      Radius around brush stroke to consider
+            z_val (int or float):      The z-index or slice index for the umbilicus_points
+
+        Returns:
+            Set[int]: Subset of self.selected_nodes that are inside the pizza slice arc.
+        """
+        # Check prerequisites
+        if not hasattr(self.fragment, 'params') or self.fragment.params is None:
+            print("Missing params")
+            return None
+            
+        if 'umbilicus_points' not in self.fragment.params or self.fragment.params['umbilicus_points'] is None:
+            print("Missing umbilicus_points")
+            return None
+            
+        if not hasattr(self, 'selected_nodes') or not self.selected_nodes:
+            print("No selected_nodes")
+            return None
+
+        if not hasattr(self, 'adjacency_list') or self.adjacency_list is None:
+            print("No adjacency_list")
+            return None
+
+        # Get umbilicus point for this z-level
+        umbilicus_point_3d = self.fragment.params['umbilicus_points'][z_val]
+        umbilicus_xy = umbilicus_point_3d[:2]
+
+        # Convert brush points to numpy array if not already
+        brush_points = np.asarray(brush_points)
+    
+        if brush_points.shape[0] < 2:
+            print("Brush arc has fewer than 2 points—nothing to do")
+            return None
+
+        # Calculate angles for all brush points relative to umbilicus
+        angles = []
+        for point in brush_points:
+            dx = point[0] - umbilicus_xy[0]
+            dy = point[1] - umbilicus_xy[1]
+            angle = np.arctan2(dy, dx)
+            # Convert to degrees and ensure positive angles (0 to 360)
+            angle_deg = np.degrees(angle) % 360
+            angles.append(angle_deg)
+
+        # Sort angles and find largest gap
+        angles = np.array(sorted(angles))
+        angle_diffs = np.diff(angles)
+        # Add the wrap-around difference
+        angle_diffs = np.append(angle_diffs, 360 - (angles[-1] - angles[0]))
+        max_gap_idx = np.argmax(angle_diffs)
+        max_gap = angle_diffs[max_gap_idx]
+
+        # Determine if we have a complete circle or an arc
+        GAP_THRESHOLD = 60  # degrees
+        is_complete_circle = max_gap <= GAP_THRESHOLD
+
+        if is_complete_circle:
+            print("Complete circle detected")
+            arc_start = 0
+            arc_end = 360
+        else:
+            # The arc starts after the largest gap
+            if max_gap_idx == len(angles) - 1:
+                arc_start = angles[0]
+                arc_end = angles[-1]
+            else:
+                arc_start = angles[max_gap_idx + 1]
+                arc_end = angles[max_gap_idx] + 360 if angles[max_gap_idx + 1] < angles[max_gap_idx] else angles[max_gap_idx]
+            print(f"Arc detected: {arc_start:.1f}° to {arc_end:.1f}°")
+
+        # Find nodes within the arc
+        nodes_in_arc = set()
+        for node in self.selected_nodes:
+            node_point = self.fragment.gpoints[node][:2]  # Get x,y coordinates
+            
+            # Calculate angle for this node
+            dx = node_point[0] - umbilicus_xy[0]
+            dy = node_point[1] - umbilicus_xy[1]
+            node_angle = np.degrees(np.arctan2(dy, dx)) % 360
+
+            # Check if node is within the arc
+            if is_complete_circle:
+                nodes_in_arc.add(node)
+            else:
+                # Handle wrap-around case
+                if arc_start > arc_end:
+                    if node_angle >= arc_start or node_angle <= arc_end:
+                        nodes_in_arc.add(node)
+                else:
+                    if arc_start <= node_angle <= arc_end:
+                        nodes_in_arc.add(node)
+
+        print(f"Found {len(nodes_in_arc)} nodes in arc")
+        return nodes_in_arc
+
+
+    # def moveSelectedNodesToBrushArc(self):
     def findDominantWrap2D(self):
         """
         For each selected node, finds its adjacent nodes at the same z-level.
@@ -1861,7 +1966,7 @@ class TrglFragmentView(BaseFragmentView):
             return None
 
         # Get target number of adjacent points
-        target_adjacent = int(self.fragment.params['pts_per_wrap'] / 1.5)
+        target_adjacent = int(self.fragment.params['pts_per_wrap'] )
         print("pts_per_wrap", self.fragment.params['pts_per_wrap'])
         print("target_adjacent", target_adjacent)
         

@@ -2640,6 +2640,11 @@ into and out of the viewing plane.
         if not current_frag:
             print("current_frag is None")
             return
+        
+        print(self.axis, self.positionOnAxis())
+        #axis 1 = z
+        #axis 0 = x
+        #axis 2 = y
 
         # Convert stroke points to numpy array - they are in data coordinates (i,j)
         stroke = np.array(self.stroke_points)
@@ -2659,25 +2664,20 @@ into and out of the viewing plane.
         print("query points", query_points.shape, query_points[0])
         global_query_points = self.volume_view.volume.transposedIjksToGlobalPositions(query_points, self.axis)
         # Use paint cursor radius for kdtree search
+        print("global_query_points", global_query_points.shape, global_query_points[0])
         current_frag.updateSelectedNodesFromPoints(global_query_points, self.paint_cursor_radius)
         
-        # Get the selected nodes and their positions for printing
-        if current_frag.selected_nodes:
-            node_indices = sorted(current_frag.selected_nodes)
-            node_positions = [tuple(current_frag.vpoints[idx, :3]) for idx in node_indices]
-            print(f"Intersecting node indices: {len(node_indices)}, {node_indices[0]}")
-            print(f"Node positions (ijk): {len(node_positions)}, {node_positions[0]}")
-        else:
-            print("No intersecting nodes found")
-
-        #Do additional brush logic here
-        #uses the selected nodes to find the dominant wrap in that selection
-        #the nodes that are in that wrap
-        print("current_frag", current_frag)
-        if current_frag.fragment.type == BaseFragment.Type.TRGL_FRAGMENT:
+        # arc logic only relevant for z-axis on trgl_fragments
+        if current_frag.fragment.type == BaseFragment.Type.TRGL_FRAGMENT and self.axis == 1:
+            # Find dominant wrap in selection
             current_frag.findDominantWrap2D()
-
-                    
+            print("selected nodes", current_frag.selected_nodes)
+            # Find nodes within the brush arc
+            arc_nodes = current_frag.findNodesInBrushArc(sampled_points, self.paint_cursor_radius, self.positionOnAxis())
+            print("arc nodes", arc_nodes)
+            if arc_nodes:
+                # Update selected nodes to only those within the arc
+                current_frag.selected_nodes = arc_nodes
 
     def point_to_line_distance(self, p, a, b):
         """Calculate distance from point p to line segment ab"""
