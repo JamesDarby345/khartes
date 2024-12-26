@@ -1895,18 +1895,19 @@ class TrglFragmentView(BaseFragmentView):
         new_y = umbilicus_xy[1] + new_radii * np.sin(angles_rad)
         
         # Create array of new positions, maintaining Z coordinates
+        #move points assumes x,z,y
         new_positions = np.column_stack((
             new_x, 
             self.fragment.gpoints[selected_indices][:, 2],
             new_y
         ))
 
-        print("new_positions", new_positions.shape, new_positions[0])
+        # print("new_positions", new_positions.shape, new_positions[0])
         
         # Move all points at once
-        self.movePoints(selected_indices, new_positions, True, False)
+        self.movePoints(selected_indices, new_positions, True, True)
 
-        print(f"Moved {len(self.selected_nodes)} nodes to interpolated positions")
+        # print(f"Moved {len(self.selected_nodes)} nodes to interpolated positions")
         
         
         
