@@ -1873,9 +1873,19 @@ class TrglFragmentView(BaseFragmentView):
         # Convert brush points to numpy array if not already
         brush_points = np.asarray(brush_points)
     
-        if brush_points.shape[0] < 2:
-            print("Brush arc has fewer than 2 points—nothing to do")
+        if brush_points.shape[0] == 0:
+            print("No brush points—nothing to do")
             return None
+            
+        if brush_points.shape[0] == 1:
+            # For single point, use KD tree for efficient radius search
+            point = np.array([brush_points[0][0], brush_points[0][1], z_val])
+            if self.kd_tree is None:
+                print("KD tree is None")
+                return set()
+            indices = self.kd_tree.query_ball_point(point, brush_radius)
+            # Only return nodes that are in selected_nodes
+            return set(indices) & self.selected_nodes
 
         # Calculate angles for all brush points relative to umbilicus
         angles = []
