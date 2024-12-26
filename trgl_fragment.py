@@ -1835,6 +1835,86 @@ class TrglFragmentView(BaseFragmentView):
             # print("ts", len(trgl_stack))
         return out_trgls
     
+    def moveSelectedNodesToBrushArc(self, brush_points, brush_radius, z_val):
+        """
+        Moves selected nodes to positions interpolated from brush points, maintaining their angles
+        but adjusting their radii to match the interpolated brush arc.
+        
+        Args:
+            brush_points (np.ndarray): Array of (x,y) brush stroke points
+            brush_radius (float): Radius around brush stroke to consider
+            z_val (int): Z-level index
+        """
+        if not hasattr(self.fragment, 'params') or self.fragment.params is None:
+            print("Missing params")
+            return None
+            
+        if 'umbilicus_points' not in self.fragment.params or self.fragment.params['umbilicus_points'] is None:
+            print("Missing umbilicus_points")
+            return None
+            
+        if not hasattr(self, 'selected_nodes') or not self.selected_nodes:
+            print("No selected_nodes")
+            return None
+
+        # Get umbilicus point for this z-level
+        umbilicus_point_3d = self.fragment.params['umbilicus_points'][z_val]
+        umbilicus_xy = umbilicus_point_3d[:2]
+
+        # Convert brush points to polar coordinates
+        brush_points = np.asarray(brush_points)
+        brush_vectors = brush_points - umbilicus_xy
+        brush_angles = np.degrees(np.arctan2(brush_vectors[:, 1], brush_vectors[:, 0])) % 360
+        brush_radii = np.sqrt(np.sum(brush_vectors**2, axis=1))
+
+        # Sort brush points by angle
+        sort_idx = np.argsort(brush_angles)
+        brush_angles = brush_angles[sort_idx]
+        brush_radii = brush_radii[sort_idx]
+
+        # Convert selected nodes to polar coordinates
+        selected_indices = np.array(list(self.selected_nodes))
+        selected_points = self.fragment.gpoints[selected_indices][:, :2]
+        vectors = selected_points - umbilicus_xy
+        node_angles = np.degrees(np.arctan2(vectors[:, 1], vectors[:, 0])) % 360
+        node_radii = np.sqrt(np.sum(vectors**2, axis=1))
+
+        # Handle wrap-around for interpolation
+        # If the brush stroke crosses the 0/360 boundary, adjust angles
+        if brush_angles[-1] - brush_angles[0] > 180:
+            # Some points need to be adjusted by +360 for proper interpolation
+            brush_angles = np.where(brush_angles < brush_angles[0], brush_angles + 360, brush_angles)
+            node_angles = np.where(node_angles < brush_angles[0], node_angles + 360, node_angles)
+
+        # Interpolate radii for each node based on its angle
+        new_radii = np.interp(node_angles, brush_angles, brush_radii)
+
+        # Convert back to cartesian coordinates
+        angles_rad = np.radians(node_angles)
+        new_x = umbilicus_xy[0] + new_radii * np.cos(angles_rad)
+        new_y = umbilicus_xy[1] + new_radii * np.sin(angles_rad)
+        
+        # Create array of new positions, maintaining Z coordinates
+        new_positions = np.column_stack((
+            new_x, 
+            self.fragment.gpoints[selected_indices][:, 2],
+            new_y
+        ))
+
+        print("new_positions", new_positions.shape, new_positions[0])
+        
+        # Move all points at once
+        self.movePoints(selected_indices, new_positions, True, False)
+
+        print(f"Moved {len(self.selected_nodes)} nodes to interpolated positions")
+        
+        
+        
+
+
+
+
+
     def findNodesInBrushArc(self, brush_points, brush_radius, z_val):
         """
         Finds nodes in self.selected_nodes that lie within the 'pizza slice' arc
@@ -1879,8 +1959,8 @@ class TrglFragmentView(BaseFragmentView):
         if brush_points.shape[0] == 1:
             # For single point, use KD tree for efficient radius search
             point = np.array([brush_points[0][0], brush_points[0][1], z_val])
-            if self.kd_tree is None:
-                print("KD tree is None")
+            if not hasattr(self, 'kd_tree') or self.kd_tree is None:
+                print("No KD tree")
                 return set()
             indices = self.kd_tree.query_ball_point(point, brush_radius)
             # Only return nodes that are in selected_nodes
@@ -1944,7 +2024,6 @@ class TrglFragmentView(BaseFragmentView):
                     if arc_start <= node_angle <= arc_end:
                         nodes_in_arc.add(node)
 
-        print(f"Found {len(nodes_in_arc)} nodes in arc")
         return nodes_in_arc
 
 
@@ -1978,9 +2057,7 @@ class TrglFragmentView(BaseFragmentView):
 
         # Get target number of adjacent points
         target_adjacent = int(self.fragment.params['pts_per_wrap'])
-        print("pts_per_wrap", self.fragment.params['pts_per_wrap'])
-        print("target_adjacent", target_adjacent)
-        
+
         # First find the best group containing most selected nodes
         groups = []
         for start_node in self.selected_nodes:
@@ -2106,10 +2183,6 @@ class TrglFragmentView(BaseFragmentView):
                         if len(final_group) >= target_adjacent:
                             break
 
-        print(f"Final wrap size: {len(final_group)}")
-        print(f"Split node angle: {target_angle:.1f}°")
-        print(f"Start node angle: {opposite_angle:.1f}°")
-        
         self.selected_nodes = final_group
         return final_group
 

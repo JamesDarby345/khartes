@@ -2671,13 +2671,12 @@ into and out of the viewing plane.
         if current_frag.fragment.type == BaseFragment.Type.TRGL_FRAGMENT and self.axis == 1:
             # Find dominant wrap in selection
             current_frag.findDominantWrap2D()
-            print("selected nodes", current_frag.selected_nodes)
             # Find nodes within the brush arc
             arc_nodes = current_frag.findNodesInBrushArc(sampled_points, self.paint_cursor_radius, self.positionOnAxis())
-            print("arc nodes", arc_nodes)
             if arc_nodes:
                 # Update selected nodes to only those within the arc
                 current_frag.selected_nodes = arc_nodes
+                current_frag.moveSelectedNodesToBrushArc(sampled_points, self.paint_cursor_radius, self.positionOnAxis())
 
     def point_to_line_distance(self, p, a, b):
         """Calculate distance from point p to line segment ab"""
