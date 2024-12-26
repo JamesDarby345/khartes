@@ -1835,7 +1835,6 @@ class TrglFragmentView(BaseFragmentView):
             # print("ts", len(trgl_stack))
         return out_trgls
     
-    #TODO: very buggy
     def findNodesInBrushArc(self, brush_points, brush_radius, z_val):
         """
         Finds nodes in self.selected_nodes that lie within the 'pizza slice' arc
@@ -1953,12 +1952,10 @@ class TrglFragmentView(BaseFragmentView):
     def findDominantWrap2D(self):
         """
         For each selected node, finds its adjacent nodes at the same z-level.
-        Returns the group that contains the most selected nodes.
-        
-        Returns:
-            set: The set of node indices forming the largest group containing selected nodes
+        Returns the group that contains the most selected nodes, oriented so the wrap's
+        discontinuity is in the middle of the largest gap between selected nodes.
         """
-        # Check if we have the required parameters
+        # Initial validation checks remain the same
         if not hasattr(self.fragment, 'params') or self.fragment.params is None:
             print("Missing params")
             return None
@@ -1974,31 +1971,30 @@ class TrglFragmentView(BaseFragmentView):
         if not hasattr(self, 'adjacency_list') or self.adjacency_list is None:
             print("no adjacency_list")
             return None
+        
+        if 'umbilicus_points' not in self.fragment.params or self.fragment.params['umbilicus_points'] is None:
+            print("Missing umbilicus_points")
+            return None
 
         # Get target number of adjacent points
-        target_adjacent = int(self.fragment.params['pts_per_wrap'] )
+        target_adjacent = int(self.fragment.params['pts_per_wrap'])
         print("pts_per_wrap", self.fragment.params['pts_per_wrap'])
         print("target_adjacent", target_adjacent)
         
-        # For each selected node, find its group of adjacent nodes at the same z-level
+        # First find the best group containing most selected nodes
         groups = []
         for start_node in self.selected_nodes:
-            # Get z-value of the start node
             start_z = round(self.fragment.gpoints[start_node][2], 2)
             
-            # Find all connected nodes at the same z-level using BFS
+            visited = {start_node}
             group = {start_node}
             queue = [start_node]
-            visited = {start_node}
             
             while queue and len(group) < target_adjacent:
                 current = queue.pop(0)
-                
-                # Check each neighbor
                 for neighbor in self.adjacency_list[current]:
                     if neighbor not in visited:
                         visited.add(neighbor)
-                        # Check if neighbor is at same z-level
                         neighbor_z = round(self.fragment.gpoints[neighbor][2], 2)
                         if neighbor_z == start_z:
                             group.add(neighbor)
@@ -2009,23 +2005,113 @@ class TrglFragmentView(BaseFragmentView):
             if len(group) >= target_adjacent:
                 groups.append(group)
         
-        # Find the group that contains the most originally selected nodes
+        # Find group with most selected nodes
         best_group = None
         max_selected = 0
-        
         for group in groups:
             selected_count = len(group & self.selected_nodes)
             if selected_count > max_selected:
                 max_selected = selected_count
                 best_group = group
         
-        if best_group is not None:
-            print("best_group size:", len(best_group))
-            print("contains selected nodes:", len(best_group & self.selected_nodes))
-            self.selected_nodes = best_group
-            return best_group
+        if best_group is None:
+            return None
+
+        # Find the best split point (in largest gap)
+        z_val = int(round(self.fragment.gpoints[list(self.selected_nodes)[0]][2], 2))
+        umbilicus_point_3d = self.fragment.params['umbilicus_points'][z_val]
+        umbilicus_xy = umbilicus_point_3d[:2]
+        
+        # Calculate angles for selected nodes
+        selected_angles = []
+        for node in self.selected_nodes:
+            node_point = self.fragment.gpoints[node][:2]
+            dx = node_point[0] - umbilicus_xy[0]
+            dy = node_point[1] - umbilicus_xy[1]
+            angle = np.degrees(np.arctan2(dy, dx)) % 360
+            selected_angles.append(angle)
+        
+        # Find largest gap
+        angles = np.array(sorted(selected_angles))
+        angle_diffs = np.diff(angles)
+        wrap_diff = 360 - (angles[-1] - angles[0])
+        angle_diffs = np.append(angle_diffs, wrap_diff)
+        max_gap_idx = np.argmax(angle_diffs)
+        max_gap = angle_diffs[max_gap_idx]
+        
+        # Calculate target angle in middle of largest gap
+        if max_gap_idx == len(angles) - 1:
+            start_angle = angles[-1]
+            end_angle = angles[0] + 360
+        else:
+            start_angle = angles[max_gap_idx]
+            end_angle = angles[max_gap_idx + 1]
+            if end_angle < start_angle:
+                end_angle += 360
+        
+        target_angle = ((start_angle + end_angle) / 2) % 360
+        
+        # Find node closest to target angle in best_group
+        best_split_node = None
+        min_angle_diff = float('inf')
+        
+        for node in best_group:
+            node_point = self.fragment.gpoints[node][:2]
+            dx = node_point[0] - umbilicus_xy[0]
+            dy = node_point[1] - umbilicus_xy[1]
+            node_angle = np.degrees(np.arctan2(dy, dx)) % 360
+            angle_diff = min((node_angle - target_angle) % 360, 
+                            (target_angle - node_angle) % 360)
             
-        return None
+            if angle_diff < min_angle_diff:
+                min_angle_diff = angle_diff
+                best_split_node = node
+        
+        if best_split_node is None:
+            return None
+
+        # Now build the wrap starting from the opposite side of the split
+        opposite_angle = (target_angle + 180) % 360
+        start_node = None
+        min_angle_diff = float('inf')
+        
+        # Find the node closest to the opposite angle
+        for node in best_group:
+            node_point = self.fragment.gpoints[node][:2]
+            dx = node_point[0] - umbilicus_xy[0]
+            dy = node_point[1] - umbilicus_xy[1]
+            node_angle = np.degrees(np.arctan2(dy, dx)) % 360
+            angle_diff = min((node_angle - opposite_angle) % 360, 
+                            (opposite_angle - node_angle) % 360)
+            
+            if angle_diff < min_angle_diff:
+                min_angle_diff = angle_diff
+                start_node = node
+
+        # Build the final wrap group starting from the opposite point
+        start_z = round(self.fragment.gpoints[start_node][2], 2)
+        final_group = {start_node}
+        visited = {start_node}
+        queue = [start_node]
+        
+        while queue and len(final_group) < target_adjacent:
+            current = queue.pop(0)
+            for neighbor in self.adjacency_list[current]:
+                if neighbor not in visited and neighbor != best_split_node:  # Avoid crossing the split
+                    visited.add(neighbor)
+                    neighbor_z = round(self.fragment.gpoints[neighbor][2], 2)
+                    if neighbor_z == start_z:
+                        final_group.add(neighbor)
+                        queue.append(neighbor)
+                        if len(final_group) >= target_adjacent:
+                            break
+
+        print(f"Final wrap size: {len(final_group)}")
+        print(f"Split node angle: {target_angle:.1f}°")
+        print(f"Start node angle: {opposite_angle:.1f}°")
+        
+        self.selected_nodes = final_group
+        return final_group
 
 
 
