@@ -22,6 +22,7 @@ class ProjectView:
         print("Initializing project view")
         self.project = project
         self.valid = False
+        self.main_window = None  # Reference to main window, set later
         if not project.valid:
             return
 

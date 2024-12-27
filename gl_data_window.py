@@ -292,7 +292,7 @@ class GLDataWindow(DataWindow):
         mfv = pv.mainActiveFragmentView(unaligned_ok=True)
         if mfv is None:
             return False
-        if mfv is not None and dw.indexed_fvs is not None and mfv in indexed_fvs:
+        if dw.indexed_fvs is not None and mfv in indexed_fvs:            
             mfvi = indexed_fvs.index(mfv)
         if mfvi < 0:
             return False

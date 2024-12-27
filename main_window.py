@@ -26,7 +26,8 @@ from PyQt5.QtWidgets import (
         QStatusBar, QStyle, QStyledItemDelegate,
         QTableView, QTabWidget, QTextEdit, QToolBar,
         QVBoxLayout, 
-        QWidget, QRadioButton
+        QWidget, QRadioButton, QFormLayout,
+        QScrollArea
         )
 from PyQt5.QtCore import (
         QAbstractTableModel, QCoreApplication, QObject,
@@ -973,6 +974,69 @@ class PaintModeButton(QPushButton):
         else:
             self.setStyleSheet("QPushButton {padding: 5}")
 
+class BrushControlPanel(QGroupBox):
+    def __init__(self, main_window, parent=None):
+        super(BrushControlPanel, self).__init__("Brush Control", parent)
+        self.main_window = main_window
+        
+        layout = QFormLayout()
+        
+        # Angle threshold spinner
+        self.angle_threshold = QDoubleSpinBox()
+        self.angle_threshold.setRange(0.1, 90.0)
+        self.angle_threshold.setSingleStep(0.5)
+        self.angle_threshold.setDecimals(1)
+        self.angle_threshold.setValue(main_window.draw_settings["brush_control"]["angle_threshold"])
+        self.angle_threshold.valueChanged.connect(self.onAngleThresholdChanged)
+        layout.addRow("Angle Threshold (°):", self.angle_threshold)
+        
+        # Falloff type combo
+        self.falloff_type = QComboBox()
+        self.falloff_type.addItems(["Cosine", "Quadratic"])
+        current_falloff = main_window.draw_settings["brush_control"]["falloff_type"]
+        self.falloff_type.setCurrentText(current_falloff.capitalize())
+        self.falloff_type.currentTextChanged.connect(self.onFalloffTypeChanged)
+        layout.addRow("Falloff Type:", self.falloff_type)
+        
+        # Search radius spinner
+        self.search_radius = QDoubleSpinBox()
+        self.search_radius.setRange(1.0, 500.0)
+        self.search_radius.setSingleStep(5.0)
+        self.search_radius.setDecimals(1)
+        self.search_radius.setValue(main_window.draw_settings["brush_control"]["search_radius"])
+        self.search_radius.valueChanged.connect(self.onSearchRadiusChanged)
+        layout.addRow("Search Radius:", self.search_radius)
+        
+        # Minimum effect spinner
+        self.min_effect = QDoubleSpinBox()
+        self.min_effect.setRange(0.0, 1.0)
+        self.min_effect.setSingleStep(0.05)
+        self.min_effect.setDecimals(2)
+        self.min_effect.setValue(main_window.draw_settings["brush_control"]["min_effect"])
+        self.min_effect.valueChanged.connect(self.onMinEffectChanged)
+        layout.addRow("Min Effect:", self.min_effect)
+        
+        self.setLayout(layout)
+    
+    def onAngleThresholdChanged(self, value):
+        self.main_window.draw_settings["brush_control"]["angle_threshold"] = value
+        
+    def onFalloffTypeChanged(self, text):
+        self.main_window.draw_settings["brush_control"]["falloff_type"] = text.lower()
+        
+    def onSearchRadiusChanged(self, value):
+        self.main_window.draw_settings["brush_control"]["search_radius"] = value
+        
+    def onMinEffectChanged(self, value):
+        self.main_window.draw_settings["brush_control"]["min_effect"] = value
+        
+    def updateFromSettings(self):
+        settings = self.main_window.draw_settings["brush_control"]
+        self.angle_threshold.setValue(settings["angle_threshold"])
+        self.falloff_type.setCurrentText(settings["falloff_type"].capitalize())
+        self.search_radius.setValue(settings["search_radius"])
+        self.min_effect.setValue(settings["min_effect"])
+
 class MainWindow(QMainWindow):
 
     appname = "χάρτης"
@@ -1004,6 +1068,12 @@ class MainWindow(QMainWindow):
             "apply_opacity": True,
         },
         "paint_mode_enabled": False,
+        "brush_control": {
+            "angle_threshold": 5.0,  # degrees
+            "falloff_type": "cosine", # "cosine" or "quadratic"
+            "search_radius": 50.0,  # pixels
+            "min_effect": 0.1,  # minimum effect strength (0-1)
+        },
         "borders": {
             "width": 1,
             "opacity": 1.0,
@@ -1840,14 +1910,74 @@ class MainWindow(QMainWindow):
         more_vbox.addStretch()
         more_layout = QVBoxLayout()
         more_frame.setLayout(more_layout)
+
+         # Add existing widgets
         zmww = ZarrMaxWindowWidthEditor(self)
         more_layout.addWidget(zmww)
         zmcs = ZarrMaxCacheGb(self)
         more_layout.addWidget(zmcs)
 
         hlayout.addStretch()
-        # fragment_layout = QVBoxLayout()
-        # fragment_layout.addWidget(QLabel("Fragment View"))
+        
+        # Add brush control settings
+        brush_vbox = QVBoxLayout()
+        hlayout.addLayout(brush_vbox)
+        brush_frame = QGroupBox("Brush Control")
+        brush_vbox.addWidget(brush_frame)
+        brush_vbox.addStretch()
+        brush_layout = QFormLayout()
+        brush_frame.setLayout(brush_layout)
+        
+        # Angle threshold spinner
+        angle_threshold = QDoubleSpinBox()
+        angle_threshold.setRange(0.1, 90.0)
+        angle_threshold.setSingleStep(0.5)
+        angle_threshold.setDecimals(1)
+        angle_threshold.setValue(self.draw_settings["brush_control"]["angle_threshold"])
+        angle_threshold.valueChanged.connect(
+            lambda v: self.setDrawSettingsValue("brush_control", "angle_threshold", v)
+        )
+        brush_layout.addRow("Angle Threshold (°):", angle_threshold)
+        
+        # Falloff type combo
+        falloff_type = QComboBox()
+        falloff_type.addItems(["Cosine", "Quadratic"])
+        current_falloff = self.draw_settings["brush_control"]["falloff_type"]
+        falloff_type.setCurrentText(current_falloff.capitalize())
+        falloff_type.currentTextChanged.connect(
+            lambda t: self.setDrawSettingsValue("brush_control", "falloff_type", t.lower())
+        )
+        brush_layout.addRow("Falloff Type:", falloff_type)
+        
+        # Search radius spinner
+        search_radius = QDoubleSpinBox()
+        search_radius.setRange(1.0, 10000.0)
+        search_radius.setSingleStep(1.0)
+        search_radius.setDecimals(1)
+        search_radius.setValue(self.draw_settings["brush_control"]["search_radius"])
+        search_radius.valueChanged.connect(
+            lambda v: self.setDrawSettingsValue("brush_control", "search_radius", v)
+        )
+        brush_layout.addRow("Search Radius:", search_radius)
+        
+        # Minimum effect spinner
+        min_effect = QDoubleSpinBox()
+        min_effect.setRange(0.0, 10.0)
+        min_effect.setSingleStep(0.05)
+        min_effect.setDecimals(2)
+        min_effect.setValue(self.draw_settings["brush_control"]["min_effect"])
+        min_effect.valueChanged.connect(
+            lambda v: self.setDrawSettingsValue("brush_control", "min_effect", v)
+        )
+        brush_layout.addRow("Min Effect:", min_effect)
+        
+        # Store widgets for updating from settings
+        self.draw_settings_widgets["brush_control"] = {
+            "angle_threshold": angle_threshold,
+            "falloff_type": falloff_type,
+            "search_radius": search_radius,
+            "min_effect": min_effect
+        }
 
         self.tab_panel.addTab(panel, "Settings")
 
@@ -2294,7 +2424,7 @@ class MainWindow(QMainWindow):
             
             # Store both points per wrap and umbilicus points if they were used
             params = {}
-            params['pts_per_wrap'] = values['xy_points'] // values['wraps']
+            params['pts_per_wrap'] = values['xy_roll_points'] // values['wraps']
             if umbilicus_points is not None and len(umbilicus_points) > 0:
                 params['umbilicus_points'] = umbilicus_points
                 
@@ -3563,6 +3693,8 @@ class MainWindow(QMainWindow):
         project_view.project.modified_callback = self.projectModifiedCallback
         self.project_view = project_view
         if project_view is not None:
+            # Add reference to main window
+            project_view.main_window = self
             # Apply initial retriangulate state when project is loaded
             self.setRetriangulate(self.initial_retriangulate_state)
         self.volumes_model = VolumesModel(project_view, self)
@@ -3669,6 +3801,7 @@ class MainWindow(QMainWindow):
                 w.dwKeyReleaseEvent(e)
 
     def drawSlices(self):
+        self.app.processEvents()
         self.depth.drawSlice()
         self.xline.drawSlice()
         self.inline.drawSlice()
