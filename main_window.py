@@ -3774,6 +3774,88 @@ class MainWindow(QMainWindow):
         elif e.modifiers() == Qt.ControlModifier and e.key() == Qt.Key_Z:
             # Undo lasted node added, if possible
             self.fragmentUndo()
+        elif e.modifiers() == Qt.MetaModifier and (e.key() == Qt.Key_N or e.key() == Qt.Key_M):
+            # Get active fragment view
+            #using x,z,y coordinates???
+            pv = self.project_view
+            if pv is None:
+                return
+                
+            mfv = pv.mainActiveFragmentView(unaligned_ok=True)
+            if mfv is None:
+                return
+                
+            # Check fragment type
+            if mfv.fragment.type == BaseFragment.Type.UMBILICUS:
+                # For umbilicus fragments, navigate through manual nodes
+                if not hasattr(mfv, 'manual_points') or mfv.manual_points is None or len(mfv.manual_points) == 0:
+                    return
+                    
+                # Get current z position
+                cur_z = round(self.volumeView().ijktf[1])
+                
+                # Sort manual points by z coordinate
+                z_coords = mfv.manual_points[:, 2]
+                sorted_indices = np.argsort(z_coords)
+                sorted_z = z_coords[sorted_indices]
+
+                # Find next/previous manual node
+                if e.key() == Qt.Key_N:
+                    # Find next z value greater than current
+                    next_indices = np.where(sorted_z > cur_z)[0]
+                    if len(next_indices) > 0:
+                        next_z = sorted_z[next_indices[0]]
+                    else:
+                        return
+                else:  # Key_M
+                    # Find previous z value less than current
+                    prev_indices = np.where(sorted_z < cur_z)[0]
+                    if len(prev_indices) > 0:
+                        next_z = sorted_z[prev_indices[-1]]
+                    else:
+                        return
+                    
+                # Update z position
+                vv = self.volumeView()
+                if vv is not None:
+                    tijk = list(vv.ijktf)
+                    tijk[1] = round(next_z)  # Round before setting
+                    vv.ijktf = tijk
+                    self.drawSlices()
+                    
+            else:  # 2.5D or 3D fragment
+                # Navigate through slices with nodes
+                vv = self.volumeView()
+                if vv is None:
+                    return
+                    
+                # Get current z position
+                cur_z = round(vv.ijktf[1])
+                # Get all z positions with nodes
+                z_positions = np.unique(mfv.fpoints[:, 1])
+                if len(z_positions) == 0:
+                    return
+                # Find next/previous slice with nodes
+                if e.key() == Qt.Key_N:
+                    # Find next z value greater than current
+                    next_indices = np.where(z_positions > cur_z)[0]
+                    if len(next_indices) > 0:
+                        next_z = z_positions[next_indices[0]]
+                    else:
+                        return
+                else:  # Key_M
+                    # Find previous z value less than current
+                    prev_indices = np.where(z_positions < cur_z)[0]
+                    if len(prev_indices) > 0:
+                        next_z = z_positions[prev_indices[-1]]
+                    else:
+                        return
+                
+                # Update z position
+                tijk = list(vv.ijktf)
+                tijk[1] = round(next_z)  # Round before setting
+                vv.ijktf = tijk
+                self.drawSlices()
         else:
             w = QApplication.widgetAt(QCursor.pos())
             method = getattr(w, "dwKeyPressEvent", None)
