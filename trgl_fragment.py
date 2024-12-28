@@ -644,6 +644,7 @@ class TrglFragmentView(BaseFragmentView):
         # self.half_width_multiplier = 10
         self.half_width_multiplier = 5
         self.retriangulate_enabled = True
+        self.gpoints_history = []
         if len(trgl_fragment.trgls) == 0:
             self.mesh_visible = False
 
@@ -1024,10 +1025,37 @@ class TrglFragmentView(BaseFragmentView):
         super(TrglFragmentView, self).setVolumeView(vol_view)
 
     def pushFragmentState(self):
-        pass
+        """Push the current fragment state onto the undo stack."""
+        
+        # Save triangulation state
+        state = {
+            'gpoints': np.copy(self.fragment.gpoints),
+            'gtpoints': np.copy(self.fragment.gtpoints),
+            'stpoints': np.copy(self.stpoints) if self.stpoints is not None else None,
+            'all_stpoints': np.copy(self.all_stpoints) if self.all_stpoints is not None else None,
+            'trgls': np.copy(self.fragment.trgls) if self.fragment.trgls is not None else None,
+            'sqcm': self.sqcm
+        }
+        print("pushFragmentState", len(self.gpoints_history))
+        # Maintain max history of 10 states
+        if len(self.gpoints_history) >= 10:
+            self.gpoints_history.pop(0)  # Remove oldest state
+        self.gpoints_history.append(state)
 
     def popFragmentState(self):
-        pass
+        """Restore the previous fragment state from the undo stack."""
+        hist_size = len(self.gpoints_history)
+        if hist_size > 0:
+            state = self.gpoints_history.pop()
+            self.fragment.gpoints = state['gpoints']
+            self.fragment.gtpoints = state['gtpoints']
+            self.stpoints = state['stpoints']
+            self.all_stpoints = state['all_stpoints']
+            self.fragment.trgls = state['trgls']
+            self.sqcm = state['sqcm']
+            self.fragment.notifyModified()
+            self.setLocalPoints(True, False)
+            print("popFragmentState", len(self.gpoints_history))
 
     def setWorkingRegion(self, index, max_angle):
         if index < 0:
@@ -1379,6 +1407,9 @@ class TrglFragmentView(BaseFragmentView):
         timer.active = False # Enable timing
         
         vv = self.cur_volume_view
+        print("move points called, saving undo state")
+        # Save current state for undo
+        self.pushFragmentState()
         
         # Convert all positions at once
         timer.time("Start movePoints")
