@@ -1397,6 +1397,7 @@ class TrglFragmentView(BaseFragmentView):
                 self.sqcm = old_sqcm
 
         self.fragment.notifyModified()
+        self.buildKDTrees(True, False)  # Explicitly rebuild KD trees without updating adjacency
         return True
 
     def movePoints(self, indices, new_vijks, update_xyz, update_st):
@@ -1451,6 +1452,7 @@ class TrglFragmentView(BaseFragmentView):
             timer.time("Update st")
 
         self.fragment.notifyModified()
+        self.buildKDTrees(True, False)  # Explicitly rebuild KD trees without updating adjacency
         timer.time("Notify modified")
         return True
 

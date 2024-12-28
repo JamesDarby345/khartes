@@ -493,7 +493,7 @@ class BaseFragmentView:
         
         return axes_list
 
-    def buildKDTrees(self, recursion_ok):
+    def buildKDTrees(self, recursion_ok, build_adjacency_list=True):
         if not recursion_ok:
             return
         print("building kd tree and adjacency list")
@@ -504,15 +504,16 @@ class BaseFragmentView:
         
         # Build adjacency list from triangles
         trgls = self.trgls()
-        if trgls is not None and len(trgls) > 0:
-            self.adjacency_list = [set() for _ in range(len(self.vpoints))]
-            for tri in trgls:
-                a, b, c = tri
-                self.adjacency_list[a].update([b, c])
-                self.adjacency_list[b].update([a, c])
-                self.adjacency_list[c].update([a, b])
-        else:
-            self.adjacency_list = None
+        if build_adjacency_list:
+            if trgls is not None and len(trgls) > 0:
+                self.adjacency_list = [set() for _ in range(len(self.vpoints))]
+                for tri in trgls:
+                    a, b, c = tri
+                    self.adjacency_list[a].update([b, c])
+                    self.adjacency_list[b].update([a, c])
+                    self.adjacency_list[c].update([a, b])
+            else:
+                self.adjacency_list = None
         
         # Build KD tree using global xyz coordinates
         if hasattr(self, 'fragment') and hasattr(self.fragment, 'gpoints'):

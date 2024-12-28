@@ -65,7 +65,7 @@ class DataWindow(QLabel):
         self.selectedNodeColor = (0,m//2,m,m)  # Lighter blue for selected nodes
         self.manualNodeColor = (m,0,m,m)  # Purple for manual nodes
         self.boundingNodeColor = (m,m//4,m//4,m)
-        self.inactiveNodeColor = (m//1.4,m//1.4,m//1.4,m)
+        self.inactiveNodeColor = (m//1.5,0,0,m) #light red 
         self.triLineColor = (3*m//4,2*m//4,3*m//4,m)
         self.splineLineColor = self.triLineColor
         # self.triLineSize = 1
@@ -2598,7 +2598,7 @@ into and out of the viewing plane.
         # Use paint cursor radius for kdtree search
         print("global_query_points", global_query_points.shape, global_query_points[0])
         current_frag.updateSelectedNodesFromPoints(global_query_points, self.paint_cursor_radius)
-        
+        print("cursor radius", self.paint_cursor_radius)
         # arc logic only relevant for z-axis on trgl_fragments
         if current_frag.fragment.type == BaseFragment.Type.TRGL_FRAGMENT and self.axis == 1:
             # Find dominant wrap in selection
