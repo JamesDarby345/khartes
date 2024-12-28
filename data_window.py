@@ -652,19 +652,30 @@ class DataWindow(QLabel):
         return (filt, figt)
 
     def findNearbyNode(self, xy):
-        # if self.inAddNodeMode():
-        #     return -1
         xyijks = self.cur_frag_pts_xyijk
         if xyijks is None:
             return -1
         if xyijks.shape[0] == 0:
             return -1
-        xys = xyijks[:,0:2]
-        # print(xys.dtype)
-        # print("xy, xys, len", xy, xys, len(xys))
-        # print("xys minus", xys-np.array(xy))
-        ds = npla.norm(xys-np.array(xy), axis=1)
-        # print(ds)
+            
+        # Get the active fragment view
+        active_fv = self.window.project_view.mainActiveFragmentView()
+        if active_fv is None:
+            return -1
+            
+        # Filter points to only include those from the active fragment
+        active_indices = [i for i, fv in enumerate(self.cur_frag_pts_fv) if fv == active_fv]
+        if not active_indices:
+            return -1
+            
+        # Only consider points from active fragment
+        active_xys = xyijks[active_indices, 0:2]
+        ds = npla.norm(active_xys - np.array(xy), axis=1)
+        
+        if len(ds) == 0:
+            self.nearbyNodeDistance = -1
+            return -1
+            
         imin = np.argmin(ds)
         vmin = ds[imin]
         self.nearbyNodeDistance = vmin
@@ -672,11 +683,8 @@ class DataWindow(QLabel):
             self.nearbyNodeDistance = -1
             return -1
 
-        # print("fnn", imin, index, xyijks[imin])
-        # print("fnn", imin, index)
-
-        # will be stored in self.localNearbyNodeIndex
-        return imin
+        # Return the original index in cur_frag_pts_xyijk
+        return active_indices[imin]
 
     def getZoom(self):
         return self.volume_view.zoom * self.zoomMult
@@ -1167,7 +1175,8 @@ class DataWindow(QLabel):
             self.checkCursor()
             return
         
-        if not (use_neighbors or use_radius) or (self.paint_mode and (use_neighbors or use_radius)):
+        # Run zoom code if not in paint mode or if paint mode is active and alt or ctrl is pressed
+        if not (use_neighbors or use_radius or fast_mode) or (self.paint_mode and (use_neighbors or use_radius or fast_mode or fast_mode)):
             # Default zoom behavior
             self.setStatusTextFromMousePosition()
             z = self.volume_view.zoom
@@ -1228,6 +1237,16 @@ class DataWindow(QLabel):
         if self.volume_view is None:
             return
         key = e.key()
+        # Handle number keys 1-9
+        if key >= Qt.Key_1 and key <= Qt.Key_9:
+            # Get fragment index (0-based)
+            fragment_index = key - Qt.Key_1
+            fragments = list(self.window.project_view.fragments.keys())
+            # Only proceed if the fragment exists
+            if fragment_index < len(fragments):
+                self.window.setFragmentActive(fragments[fragment_index], True, True)
+            return
+
         # print(self.axis, key)
         sgn = 1  # Changed from test value of 10
         # print("kpe %x"%QGuiApplication.queryKeyboardModifiers())
@@ -1410,7 +1429,7 @@ class DataWindow(QLabel):
                 self.setWaitCursor()
                 current_frag.reparameterize()
                 self.window.drawSlices()
-        elif e.key() == Qt.Key_P:  # Use 'P' key to toggle paint mode
+        elif e.key() == Qt.Key_P or e.key() == Qt.Key_F:  # Use 'P' key to toggle paint mode
             self.togglePaintMode()
             return
         self.setStatusTextFromMousePosition()
