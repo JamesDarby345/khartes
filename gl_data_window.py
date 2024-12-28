@@ -1813,8 +1813,9 @@ class GLDataWindowChild(QOpenGLWidget):
             color = dw.nodeColor
             highlight_color = dw.highlightNodeColor
             selected_color = dw.selectedNodeColor
+            inactive_color = dw.inactiveNodeColor
             manual_color = dw.manualNodeColor
-            fvao.updateNodeColors(color, highlight_color, selected_color, manual_color, nearby_node_id, selected_nodes)
+            fvao.updateNodeColors(color, inactive_color, highlight_color, selected_color, manual_color, nearby_node_id, selected_nodes)
 
             vao = fvao.getVao()
             vao.bind()
@@ -2521,10 +2522,11 @@ class FragmentVao:
         self.size_location = size_location
         self.getVao()
 
-    def updateNodeColors(self, default_color, highlight_color, selected_color, manual_color, nearby_node_id, selected_nodes):
+    def updateNodeColors(self, default_color, inactive_color, highlight_color, selected_color, manual_color, nearby_node_id, selected_nodes):
         """
         Update the color buffer with default colors and highlight the nearby node
         default_color: RGBA color for normal nodes (0-65535 range)
+        inactive_color: RGBA color for inactive nodes (0-65535 range)
         highlight_color: RGBA color for highlighted node (0-65535 range)
         selected_color: RGBA color for selected nodes (0-65535 range)
         nearby_node_id: index of node to highlight (-1 if none)
@@ -2540,9 +2542,14 @@ class FragmentVao:
         highlight_color_arr = np.array(highlight_color, dtype=np.float32) / 65535.0
         selected_color_arr = np.array(selected_color, dtype=np.float32) / 65535.0
         manual_color_arr = np.array(manual_color, dtype=np.float32) / 65535.0
+        inactive_color_arr = np.array(inactive_color, dtype=np.float32) / 65535.0
+
 
         # Create array of default colors for all nodes
-        colors = np.full((len(fv.vpoints), 4), default_color_arr, dtype=np.float32)
+        if not fv.active:
+            colors = np.full((len(fv.vpoints), 4), inactive_color_arr, dtype=np.float32)
+        else:
+            colors = np.full((len(fv.vpoints), 4), default_color_arr, dtype=np.float32)
 
         # Set selected color for selected nodes
         if selected_nodes:

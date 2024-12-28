@@ -1491,9 +1491,9 @@ class GLSurfaceWindowChild(GLDataWindowChild):
                 color = fv.fragment.cvcolor
             highlight_color = dw.highlightNodeColor
             selected_color = dw.selectedNodeColor
-            
+            inactive_color = dw.inactiveNodeColor
             # Update the color VBO with current colors
-            fvao.updateNodeColors(color, highlight_color, selected_color, nearby_node_id, fv.selected_nodes)
+            fvao.updateNodeColors(color, inactive_color, highlight_color, selected_color, nearby_node_id, fv.selected_nodes)
                 
             f.glPointSize(node_thickness)
             f.glDrawArrays(pygl.GL_POINTS, 0, fvao.stxys_count)
@@ -1630,10 +1630,11 @@ class FragmentMapVao:
         self.normal_loc = normal_loc
         self.getVao()
 
-    def updateNodeColors(self, default_color, highlight_color, selected_color, nearby_node_id, selected_nodes):
+    def updateNodeColors(self, default_color, inactive_color, highlight_color, selected_color, nearby_node_id, selected_nodes):
         """
         Update the color buffer with default colors and highlight the nearby node
         default_color: RGBA color for normal nodes
+        inactive_color: RGBA color for inactive nodes
         highlight_color: RGBA color for highlighted node
         selected_color: RGBA color for selected nodes
         nearby_node_id: index of node to highlight (-1 if none)
@@ -1649,23 +1650,22 @@ class FragmentMapVao:
         default_color_arr = np.array(default_color, dtype=np.float32) / 65535.0
         highlight_color_arr = np.array(highlight_color, dtype=np.float32) / 65535.0
         selected_color_arr = np.array(selected_color, dtype=np.float32) / 65535.0
+        inactive_color_arr = np.array(inactive_color, dtype=np.float32) / 65535.0
         
         # Create array of default colors for all nodes
-        colors = np.full((fv.vpoints.shape[0], 4), default_color_arr, dtype=np.float32)
+        if not fv.active:
+            colors = np.full((fv.vpoints.shape[0], 4), inactive_color_arr, dtype=np.float32)
+        else:
+            colors = np.full((fv.vpoints.shape[0], 4), default_color_arr, dtype=np.float32)
 
         # Set selected color for selected nodes
-        # print("selected_nodes in update node colors", selected_nodes)
         if selected_nodes:
             selected_indices = np.array(list(selected_nodes), dtype=np.int32)
-            # print("selected_indices in update node colors", selected_indices)
             colors[selected_indices] = selected_color_arr
-        
-        # print("nearby_node_id in update node colors", nearby_node_id)
+
         # Set highlight color for nearby node if valid
         if nearby_node_id >= 0 and nearby_node_id < len(colors):
             colors[nearby_node_id] = highlight_color_arr
-
-        
 
         # Update the color buffer
         self.color_vbo.bind()

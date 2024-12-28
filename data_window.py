@@ -55,6 +55,7 @@ class DataWindow(QLabel):
         self.ntStartPoint = None
         self.cur_frag_pts_xyijk = None
         self.cur_frag_pts_fv = None
+        self.cur_frag_pts_stxy = None
         self.setMouseTracking(True)
         self.zoomMult = 1.
         m = 65535
@@ -64,7 +65,7 @@ class DataWindow(QLabel):
         self.selectedNodeColor = (0,m//2,m,m)  # Lighter blue for selected nodes
         self.manualNodeColor = (m,0,m,m)  # Purple for manual nodes
         self.boundingNodeColor = (m,m//4,m//4,m)
-        self.inactiveNodeColor = (m//2,m//4,m//4,m)
+        self.inactiveNodeColor = (m//1.4,m//1.4,m//1.4,m)
         self.triLineColor = (3*m//4,2*m//4,3*m//4,m)
         self.splineLineColor = self.triLineColor
         # self.triLineSize = 1
