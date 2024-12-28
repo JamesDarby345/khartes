@@ -2104,6 +2104,8 @@ class TrglFragmentView(BaseFragmentView):
             while queue and len(group) < target_adjacent:
                 current = queue.pop(0)
                 for neighbor in self.adjacency_list[current]:
+                    if neighbor >= len(self.fragment.gpoints):  # Add bounds check
+                        continue
                     if neighbor not in visited:
                         visited.add(neighbor)
                         neighbor_z = round(self.fragment.gpoints[neighbor][2], 2)
@@ -2208,6 +2210,8 @@ class TrglFragmentView(BaseFragmentView):
         while queue and len(final_group) < target_adjacent:
             current = queue.pop(0)
             for neighbor in self.adjacency_list[current]:
+                if neighbor >= len(self.fragment.gpoints):  # Add bounds check
+                    continue
                 if neighbor not in visited and neighbor != best_split_node:  # Avoid crossing the split
                     visited.add(neighbor)
                     neighbor_z = round(self.fragment.gpoints[neighbor][2], 2)

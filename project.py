@@ -397,8 +397,80 @@ class Project:
         self.voxel_size_um = Project.default_voxel_size_um
         self.valid = False
         self.error = "no error message set"
+        self.fragments_path = None
+        self.path = None
+        self.modified = ""
         self.modified_callback = None
         self.last_saved = ""
+        self.autosave_path_a = None
+        self.autosave_path_b = None 
+        self.last_autosave = 0
+        self.use_autosave_a = True
+        self._autosave_timer = None
+
+    def startAutosaveTimer(self, interval=None, enabled=True):
+        """Start the autosave timer if not already running"""
+        if self._autosave_timer is None:
+            from PyQt5.QtCore import QTimer
+            self._autosave_timer = QTimer()
+            self._autosave_timer.timeout.connect(self.autosave)
+            
+            # Get interval from settings - check all project views for a valid window
+            if interval is None:
+                interval = 60  # Default fallback
+            
+            for view in self.project_views:
+                if hasattr(view, 'window') and view.window is not None:
+                    print("Found window with settings:", view.window.draw_settings["autosave"])
+                    interval = view.window.draw_settings["autosave"]["interval"]
+                    enabled = view.window.draw_settings["autosave"]["enabled"]
+                    break
+            
+            if enabled:
+                print(f"Starting autosave timer with interval: {interval} seconds")
+                self._autosave_timer.start(interval * 1000)  # Convert to milliseconds
+            else:
+                print("Autosave is disabled in settings")
+                return
+
+    def stopAutosaveTimer(self):
+        """Stop the autosave timer"""
+        if self._autosave_timer is not None:
+            print("Stopping autosave timer")
+            self._autosave_timer.stop()
+            self._autosave_timer = None
+
+    def updateAutosaveTimer(self, interval=None, enabled=True):
+        """Update the timer interval if it's running"""
+        if self._autosave_timer is not None:
+            # Get interval from settings - check all project views for a valid window
+            if interval is None:
+                interval = 60  # Default fallback
+            
+            for view in self.project_views:
+                if hasattr(view, 'window') and view.window is not None:
+                    print(f"Found window with settings: {view.window.draw_settings['autosave']}")
+                    interval = view.window.draw_settings["autosave"]["interval"]
+                    enabled = view.window.draw_settings["autosave"]["enabled"]
+                    break
+            
+            if enabled:
+                print(f"Restarting timer with new interval: {interval} seconds")
+                self._autosave_timer.start(interval * 1000)  # Convert to milliseconds
+            else:
+                print("Stopping timer as autosave is disabled")
+                self.stopAutosaveTimer()
+
+    def setPath(self, path):
+        self.path = path
+        self.fragments_path = path / 'fragments'
+        self.fragments_path.mkdir(exist_ok=True)
+        self.autosave_path_a = path / 'autosave_a'
+        self.autosave_path_b = path / 'autosave_b'
+        self.autosave_path_a.mkdir(exist_ok=True)
+        self.autosave_path_b.mkdir(exist_ok=True)
+        # Remove auto-start of timer - let MainWindow control this
+        # self.startAutosaveTimer()
 
     def createErrorProject(err):
         prj = Project()
@@ -471,6 +543,7 @@ class Project:
         prj.version = 1.0
         prj.volumes_path = vdir
         prj.fragments_path = fdir
+        prj.setPath(fp)  # Call setPath to properly initialize paths and autosave
         info = {}
         for param in Project.info_parameters:
             info[param] = getattr(prj, param)
@@ -597,6 +670,10 @@ class Project:
             print(e)
             print("failed to preserve previous version")
         
+        # Save timestamp in a timestamp.txt file
+        timestamp = Utils.timestamp()
+        (self.fragments_path / 'timestamp.txt').write_text(timestamp, encoding="utf8")
+        
         # Replace BaseFragment.saveList with our new method
         self.saveAllFragments(self.fragments, self.fragments_path)
 
@@ -605,7 +682,7 @@ class Project:
             info[param] = getattr(self, param)
         info_txt = json.dumps(info, sort_keys=True, indent=4)
         (self.path / 'project.json').write_text(info_txt, encoding="utf8")
-        self.last_saved = Utils.timestamp()
+        self.last_saved = timestamp
 
     notify_counter = 0
 
@@ -620,6 +697,59 @@ class Project:
         if self.modified_callback is not None:
             self.modified_callback(self)
         Project.notify_counter += 1
+        
+        # Try to autosave whenever project is modified
+        # self.autosave()
+
+    def autosave(self):
+        """Autosave fragments to alternating folders A and B"""
+        print("autosave called")
+        if not self.valid or self.path is None:
+            print("autosave not valid", self.valid, self.path)
+            return
+            
+        # Don't autosave if no modifications since last save
+        if self.last_saved and self.modified and self.last_saved >= self.modified:
+            print("autosave not modified", self.last_saved, self.modified)
+            return
+            
+        try:
+            print("autosave trying")
+            # Choose target folder
+            target_path = self.autosave_path_a if self.use_autosave_a else self.autosave_path_b
+            
+            # Clear target folder
+            for file in target_path.glob('*'):
+                try:
+                    file.unlink()
+                except Exception as e:
+                    print(f"Failed to delete {file}: {e}")
+                    
+            # Save timestamp in a timestamp.txt file
+            timestamp = Utils.timestamp()
+            (target_path / 'timestamp.txt').write_text(timestamp, encoding="utf8")
+                
+            # Save fragments to target folder
+            self.saveAllFragments(self.fragments, target_path)
+            
+            # Update state
+            self.use_autosave_a = not self.use_autosave_a
+            
+            print(f"Autosaved to {target_path}")
+            
+        except Exception as e:
+            print(f"Autosave failed: {e}")
+
+    @staticmethod
+    def get_save_timestamp(path):
+        """Get timestamp from a save directory"""
+        try:
+            timestamp_file = path / 'timestamp.txt'
+            if timestamp_file.exists():
+                return timestamp_file.read_text(encoding="utf8")
+        except Exception as e:
+            print(f"Failed to read timestamp from {path}: {e}")
+        return None
 
     def open(fullpath, load_zarr_options=None):
         fp = pathlib.Path(fullpath)
@@ -628,13 +758,44 @@ class Project:
             print(err)
             return Project.createErrorProject(err)
 
+        # Check timestamps from all save locations
+        fragments_path = fp / 'fragments'
+        autosave_a_path = fp / 'autosave_a'
+        autosave_b_path = fp / 'autosave_b'
+        
+        timestamps = {
+            'fragments': Project.get_save_timestamp(fragments_path),
+            'autosave_a': Project.get_save_timestamp(autosave_a_path),
+            'autosave_b': Project.get_save_timestamp(autosave_b_path)
+        }
+        
+        # Find most recent save
+        most_recent = None
+        most_recent_path = None
+        for location, timestamp in timestamps.items():
+            if timestamp:
+                if most_recent is None or timestamp > most_recent:
+                    most_recent = timestamp
+                    if location == 'fragments':
+                        most_recent_path = fragments_path
+                    elif location == 'autosave_a':
+                        most_recent_path = autosave_a_path
+                    else:
+                        most_recent_path = autosave_b_path
+        
+        if most_recent_path:
+            print(f"Loading most recent save from {most_recent_path} (timestamp: {most_recent})")
+            fdir = most_recent_path
+        else:
+            print("No timestamp found, using default fragments directory")
+            fdir = fragments_path
+
         vdir = fp / 'volumes'
         if not vdir.is_dir():
             err = "Directory %s does not exist"%vdir
             print(err)
             return Project.createErrorProject(err)
 
-        fdir = fp / 'fragments'
         if not fdir.is_dir():
             err = "Directory %s does not exist"%fdir
             print(err)
@@ -665,9 +826,8 @@ class Project:
         prj.ppms = []
         prj.fragments = []
         prj.valid = True
-        prj.path = fp
         prj.volumes_path = vdir
-        prj.fragments_path = fdir
+        prj.setPath(fp)  # Call setPath to properly initialize paths and autosave
 
         for param in Project.info_parameters:
             if param not in info:
@@ -867,3 +1027,14 @@ class Project:
                 print(f"writing {len(infos)} fragments to {file}")
                 file.write_text(info_txt, encoding="utf8")
         print("saved all fragments")
+
+    def close(self):
+        """Close the project and clean up resources"""
+        self.stopAutosaveTimer()
+        self.valid = False
+        self.fragments = []
+        self.volumes = []
+        self.ppms = []
+        self.project_views = []
+
+ 

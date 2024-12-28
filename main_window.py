@@ -1103,6 +1103,10 @@ class MainWindow(QMainWindow):
             "use_cache_directory": False,
         },
         "retriangulate_enabled": True,  # Default to enabled
+        "autosave": {
+            "enabled": True,
+            "interval": 60  # seconds
+        }
     }
 
     # zarr_signal = Signal(str)
@@ -1978,6 +1982,20 @@ class MainWindow(QMainWindow):
             "search_radius": search_radius,
             "min_effect": min_effect
         }
+
+        # Add autosave settings
+        hbox = QHBoxLayout()
+        autosave_cb = AutosaveCheckBox(self)
+        self.settings_autosave_enabled = autosave_cb
+        hbox.addWidget(autosave_cb)
+        
+        hbox.addWidget(QLabel("Interval:"))
+        autosave_interval = AutosaveIntervalSpinBox(self)
+        self.settings_autosave_interval = autosave_interval
+        hbox.addWidget(autosave_interval)
+        hbox.addWidget(QLabel("seconds"))
+        hbox.addStretch()
+        slices_layout.addLayout(hbox)
 
         self.tab_panel.addTab(panel, "Settings")
 
@@ -3255,7 +3273,6 @@ class MainWindow(QMainWindow):
         loading = self.showLoading()
         self.unsetProjectView()
         load_zarr_options = None
-        # print("LP", self.use_stream_cache_directory, self.stream_cache_directory)
         if self.getUseStreamCache() and self.getStreamCacheDirectory() != "":
             load_zarr_options = {"stream_cache_directory": self.getStreamCacheDirectory()}
 
@@ -3263,7 +3280,7 @@ class MainWindow(QMainWindow):
         if not pv.valid:
             print("Project file %s not opened: %s"%(fname, pv.error))
             return
-        # print("setting project view")
+        
         self.setProjectView(pv)
         self.setWindowTitle("%s - %s"%(MainWindow.appname, Path(fname).name))
         cur_volume = pv.cur_volume
@@ -3272,26 +3289,24 @@ class MainWindow(QMainWindow):
             spv = pv.volumes
             if len(pv.volumes) > 0:
                 cur_volume = list(spv.keys())[0]
-        # print("setting volume")
+            
         self.setVolume(cur_volume, no_notify=True)
         for i, ovv in enumerate(pv.overlay_volume_views):
             if ovv is None:
                 continue
             self.setOverlay(i, ovv.volume, no_notify=True)
-        # print("volume set")
-        # intentionally called a second time to use
-        # cur_volume information to set fragment view volume
+        
+        # Intentionally called a second time to use cur_volume information to set fragment view volume
         self.setProjectView(pv)
-        # print("project view set")
+        
+        # Initialize autosave with proper settings after project is fully loaded
+        self.setAutosaveEnabled(self.draw_settings["autosave"]["enabled"])
+        
         path = Path(fname)
         path = path.absolute()
         parent = path.parent
         self.settingsSaveDirectory(str(parent))
         print(f"Finished loading project from {fname}")
-        # In theory, this shouldn't be needed, since
-        # "loading" is about to go out of scope.  But in
-        # practice, if this line isn't here, the "Loading data..."
-        # widget sometimes doesn't go away
         loading = None
 
     def onLoadHardwiredProjectButtonClick(self, s):
@@ -3726,7 +3741,10 @@ class MainWindow(QMainWindow):
         for i in range(ProjectView.overlay_count):
             self.setOverlay(i, None, no_notify=True)
         self.setFragments()
-        # self.setCurrentFragment(None)
+        
+        # Initialize autosave with proper settings
+        self.setAutosaveEnabled(self.draw_settings["autosave"]["enabled"])
+        
         self.drawSlices()
 
     def resizeEvent(self, e):
@@ -3956,3 +3974,59 @@ class MainWindow(QMainWindow):
         # print(key, has_data, int(QThread.currentThreadId()))
         if has_data:
             self.zarr_signal.emit(key)
+
+    def setAutosaveEnabled(self, enabled):
+        """Enable or disable autosave functionality"""
+
+        self.draw_settings["autosave"]["enabled"] = enabled
+        if self.project_view is not None and self.project_view.project is not None:
+            if enabled:
+                self.project_view.project.startAutosaveTimer(interval=self.draw_settings["autosave"]["interval"], enabled=True)
+            else:
+                self.project_view.project.stopAutosaveTimer()
+        self.settingsSaveDrawSettings()
+
+    def setAutosaveInterval(self, interval):
+        """Set the autosave interval in seconds"""
+        if self.draw_settings["autosave"]["interval"] == interval:
+            return
+        print(f"Autosave interval changed to: {interval} seconds")
+        self.draw_settings["autosave"]["interval"] = interval
+        if self.project_view is not None and self.project_view.project is not None:
+            self.project_view.project.updateAutosaveTimer(interval, enabled=self.draw_settings["autosave"]["enabled"])
+        self.settingsSaveDrawSettings()
+
+class AutosaveCheckBox(QCheckBox):
+    def __init__(self, main_window, parent=None):
+        super(AutosaveCheckBox, self).__init__("Enable autosave", parent)
+        self.main_window = main_window
+        self.setting = "autosave"
+        self.param = "enabled"
+        self.setChecked(main_window.draw_settings[self.setting][self.param])
+        main_window.draw_settings_widgets[self.setting][self.param] = self
+        self.stateChanged.connect(self.onStateChanged)
+
+    def onStateChanged(self, s):
+        cs = Qt.CheckState(s)
+        self.main_window.setAutosaveEnabled(cs==Qt.Checked)
+        
+    def updateValue(self, value):
+        self.setChecked(value)
+
+class AutosaveIntervalSpinBox(QSpinBox):
+    def __init__(self, main_window, parent=None):
+        super(AutosaveIntervalSpinBox, self).__init__(parent)
+        self.main_window = main_window
+        self.setting = "autosave"
+        self.param = "interval"
+        self.setRange(10, 3600)  # 10 seconds to 1 hour
+        self.setSingleStep(10)
+        self.setValue(main_window.draw_settings[self.setting][self.param])
+        main_window.draw_settings_widgets[self.setting][self.param] = self
+        self.valueChanged.connect(self.onValueChanged)
+        
+    def onValueChanged(self, value):
+        self.main_window.setAutosaveInterval(value)
+        
+    def updateValue(self, value):
+        self.setValue(value)
