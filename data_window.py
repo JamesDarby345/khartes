@@ -982,7 +982,13 @@ class DataWindow(QLabel):
     '''
 
     def mouseMoveEvent(self, e):
-        # print("move", e.localPos())
+        if self.paint_mode and self.is_painting:
+            wpos = e.localPos()
+            # Convert window coordinates to data coordinates
+            ij = self.xyToIj((wpos.x(), wpos.y()))
+            self.stroke_points.append(ij)
+            return
+        
         if self.volume_view is None:
             return
         mxy = (e.localPos().x(), e.localPos().y())
@@ -997,15 +1003,9 @@ class DataWindow(QLabel):
             zoom = self.getZoom()
             tf[self.iIndex] -= int(dx/zoom)
             tf[self.jIndex] -= int(dy/zoom)
-            # self.setIjkTf(tf)
-            # self.setIjkOrStxyTf(tf)
             self.setTf(tf)
-            # self.shiftIjk(-int(dx/zoom), -int(dy/zoom), 0)
-            # self.tfStartPoint = self.volume_view.ijktf
-            # self.mouseStartPoint = pos
             self.window.drawSlices()
         elif self.isMovingNode:
-            # print("moving node")
             if self.nnStartPoint is None:
                 print("nnStartPoint is None while moving node!")
                 return
@@ -1038,19 +1038,8 @@ class DataWindow(QLabel):
         else:
             mxy = (e.localPos().x(), e.localPos().y())
             self.setNearbyTiffAndNode(mxy)
-            '''
-            nearbyTiffCorner = self.findNearbyTiffCorner(mxy)
-            self.setNearbyTiff(nearbyTiffCorner)
-            nearbyNode = -1
-            if nearbyTiffCorner < 0:
-                nearbyNode = self.findNearbyNode(mxy)
-            # print("mxy", mxy, nearbyNode)
-            self.setNearbyNode(nearbyNode)
-            '''
-        # ij = self.xyToIj(mxy)
-        # tijk = self.ijToTijk(ij)
+
         tijk = self.xyToTijk(mxy, True)
-        # self.window.setCursorPosition(self, tijk)
         self.setCursorPosition(tijk)
         self.checkCursor()
 
@@ -2553,84 +2542,7 @@ into and out of the viewing plane.
             self.setNearbyTiffAndNode(wxy)
         self.checkCursor()
 
-    def mouseMoveEvent(self, e):
-        if self.paint_mode and self.is_painting:
-            wpos = e.localPos()
-            # Convert window coordinates to data coordinates
-            ij = self.xyToIj((wpos.x(), wpos.y()))
-            self.stroke_points.append(ij)
-            return
-        
-        if self.volume_view is None:
-            return
-        mxy = (e.localPos().x(), e.localPos().y())
-        self.setStatusTextFromMousePosition()
-        if self.isPanning:
-            self.window.zarrResetActiveTimer()
-            pos = e.localPos()
-            delta = pos-self.mouseStartPoint
-            dx,dy = delta.x(), delta.y()
-            # print("delta", dx, dy)
-            tf = list(self.tfStartPoint)
-            zoom = self.getZoom()
-            tf[self.iIndex] -= int(dx/zoom)
-            tf[self.jIndex] -= int(dy/zoom)
-            # self.setIjkTf(tf)
-            # self.setIjkOrStxyTf(tf)
-            self.setTf(tf)
-            # self.shiftIjk(-int(dx/zoom), -int(dy/zoom), 0)
-            # self.tfStartPoint = self.volume_view.ijktf
-            # self.mouseStartPoint = pos
-            self.window.drawSlices()
-        elif self.isMovingNode:
-            # print("moving node")
-            if self.nnStartPoint is None:
-                print("nnStartPoint is None while moving node!")
-                return
-            delta = e.localPos()-self.mouseStartPoint
-            dx,dy = delta.x(), delta.y()
-            zoom = self.getZoom()
-            di = int(dx/zoom)
-            dj = int(dy/zoom)
-            nij = list(self.nnStartPoint)
-            nij[0] += di
-            nij[1] += dj
-            self.window.drawSlices()
-            self.setWaitCursor()
-            self.setNearbyNodeIjk(nij, True, True)
-            self.window.drawSlices()
-        elif self.isMovingTiff:
-            if self.ntStartPoint is None:
-                print("ntStartPoint is None while moving node!")
-                return
-            delta = e.localPos()-self.mouseStartPoint
-            dx,dy = delta.x(), delta.y()
-            zoom = self.getZoom()
-            di = int(dx/zoom)
-            dj = int(dy/zoom)
-            nij = list(self.ntStartPoint)
-            nij[0] += di
-            nij[1] += dj
-            self.setNearbyTiffIjk(nij)
-            # self.window.drawSlices()
-        else:
-            mxy = (e.localPos().x(), e.localPos().y())
-            self.setNearbyTiffAndNode(mxy)
-            '''
-            nearbyTiffCorner = self.findNearbyTiffCorner(mxy)
-            self.setNearbyTiff(nearbyTiffCorner)
-            nearbyNode = -1
-            if nearbyTiffCorner < 0:
-                nearbyNode = self.findNearbyNode(mxy)
-            # print("mxy", mxy, nearbyNode)
-            self.setNearbyNode(nearbyNode)
-            '''
-        # ij = self.xyToIj(mxy)
-        # tijk = self.ijToTijk(ij)
-        tijk = self.xyToTijk(mxy, True)
-        # self.window.setCursorPosition(self, tijk)
-        self.setCursorPosition(tijk)
-        self.checkCursor()
+    
 
     def findIntersectingNodes(self):
         if not self.stroke_points:
