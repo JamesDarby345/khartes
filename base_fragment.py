@@ -1,7 +1,9 @@
+
 import time
 from utils import Utils
 import numpy as np
 from scipy.spatial import KDTree
+from spatial_hash_grid import SpatialHashGrid
 from enum import Enum
 from PyQt5.QtGui import QColor
 import json
@@ -243,6 +245,8 @@ class BaseFragmentView:
         self.local_points_modified = Utils.timestamp()
         self.normal_offset = 0.
         self.kd_tree = None  # For spatial queries
+        self.adjacency_list = None
+        self.spatial_hash_grid = None
         self.k_neighbors = 1   # Default number of neighbors
         self.current_radius = 30.0  # Default radius in global units
         self.selected_nodes = set()  # Store selected node indices
@@ -493,31 +497,44 @@ class BaseFragmentView:
         
         return axes_list
 
-    def buildKDTrees(self, recursion_ok, build_adjacency_list=True):
+    def buildKDTrees(self, recursion_ok, build_adjacency_list=True, build_spatial_hash_grid=True):
         if not recursion_ok:
             return
-        print("building kd tree and adjacency list")
+        print("fragment datastructures; adj list, kdtree, spatial hash grid")
         if not hasattr(self, 'vpoints') or self.vpoints is None or len(self.vpoints) == 0:
             self.kd_tree = None
             self.adjacency_list = None
+            self.spatial_hash_grid = None
             return
         
         # Build adjacency list from triangles
         trgls = self.trgls()
         if build_adjacency_list:
             if trgls is not None and len(trgls) > 0:
+                print("building adjacency list")
+                stime = time.time()
                 self.adjacency_list = [set() for _ in range(len(self.vpoints))]
                 for tri in trgls:
                     a, b, c = tri
                     self.adjacency_list[a].update([b, c])
                     self.adjacency_list[b].update([a, c])
                     self.adjacency_list[c].update([a, b])
+                print("adjacency list built in", time.time() - stime)
             else:
                 self.adjacency_list = None
         
         # Build KD tree using global xyz coordinates
         if hasattr(self, 'fragment') and hasattr(self.fragment, 'gpoints'):
+            print("building kd tree")
+            stime = time.time()
             self.kd_tree = KDTree(self.fragment.gpoints)
+            print("kd tree built in", time.time() - stime)
+
+            if build_spatial_hash_grid:
+                print("building spatial hash grid")
+                stime = time.time()
+                self.spatial_hash_grid = SpatialHashGrid(self.fragment.gpoints, thickness=10)
+                print("spatial hash grid built in", time.time() - stime)
 
     def updateSelectedNodes(self, point_index, k=None, radius=None, use_3d=False):
         """

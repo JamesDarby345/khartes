@@ -2598,7 +2598,7 @@ into and out of the viewing plane.
         # Use paint cursor radius for kdtree search
         print("global_query_points", global_query_points.shape, global_query_points[0])
         current_frag.updateSelectedNodesFromPoints(global_query_points, self.paint_cursor_radius)
-        print("cursor radius", self.paint_cursor_radius)
+        
         # arc logic only relevant for z-axis on trgl_fragments
         if current_frag.fragment.type == BaseFragment.Type.TRGL_FRAGMENT and self.axis == 1:
             # Find dominant wrap in selection
