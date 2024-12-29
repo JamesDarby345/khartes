@@ -11,8 +11,19 @@ from trgl_fragment import TrglFragment, TrglFragmentView
 from base_fragment import BaseFragment, BaseFragmentView
 from umbilicus_fragment import UmbilicusFragment, UmbilicusFragmentView
 from PyQt5.QtGui import QColor 
+from concurrent.futures import ThreadPoolExecutor
+import os
 
-
+# Determine optimal number of threads for I/O operations
+# Usually 2-4x number of physical drives is a good starting point
+def get_io_threads():
+    try:
+        # Try to detect number of physical drives (simplified)
+        drives = set(os.path.dirname(p) for p in ['/'] + os.getenv('PATH', '').split(':'))
+        n_drives = len(drives)
+        return max(4, min(32, n_drives * 4))  # At least 4, at most 32 threads
+    except:
+        return 8  # Reasonable default
 
 class ProjectView:
 
@@ -952,6 +963,15 @@ class Project:
                     del pv.volumes[volume]
             self.notifyModified()
 
+    @staticmethod
+    def _load_obj_file(obj_file):
+        """Helper function for parallel loading that can be pickled"""
+        try:
+            return TrglFragment.load(obj_file)
+        except Exception as e:
+            print(f"Error loading {obj_file}: {e}")
+            return None
+
     def loadAllFragments(self, path):
         """Load all fragments from all fragment type files"""
         fragments = []
@@ -971,23 +991,70 @@ class Project:
                     data = json.loads(file.read_text(encoding="utf8"))
                     if not isinstance(data, list):
                         data = [data]
+                    
+                    # For TrglFragment, load OBJ files in parallel
+                    if fragment_class == TrglFragment:
+                        # Create a list of OBJ files to load
+                        obj_files = []
+                        for info in data:
+                            if 'obj_path' in info and info['obj_path']:
+                                obj_files.append(info['obj_path'])
                         
-                    for info in data:
-                        # Use the appropriate class's fragFromDict method
-                        frag = fragment_class.fragFromDict(info)
-                        if frag and frag.valid:
-                            fragments.append(frag)
+                        if obj_files:
+                            print(f"Loading {len(obj_files)} OBJ files using {get_io_threads()} threads...")
+                            # Load OBJ files in parallel using ThreadPoolExecutor
+                            with ThreadPoolExecutor(max_workers=get_io_threads()) as executor:
+                                loaded_fragments = list(executor.map(self._load_obj_file, obj_files))
+                                
+                                # Filter out None results and flatten list of lists
+                                loaded_fragments = [frag for sublist in loaded_fragments if sublist for frag in sublist]
+                                
+                                print(f"Successfully loaded {len(loaded_fragments)} fragments")
+                                
+                                # Update fragment metadata from JSON
+                                for frag in loaded_fragments:
+                                    for info in data:
+                                        if info.get('obj_path') == str(frag.obj_path):
+                                            frag.name = info.get('name', frag.name)
+                                            frag.created = info.get('created', frag.created)
+                                            frag.modified = info.get('modified', frag.modified)
+                                            if 'color' in info:
+                                                frag.setColor(QColor(info['color']), no_notify=True)
+                                            frag.params = info.get('params', {})
+                                            frag.type = BaseFragment.Type.TRGL_FRAGMENT
+                                            break
+                                
+                                fragments.extend(loaded_fragments)
+                    else:
+                        # Handle non-TrglFragment types as before
+                        for info in data:
+                            frag = fragment_class.fragFromDict(info)
+                            if frag and frag.valid:
+                                fragments.append(frag)
                             
                 except Exception as e:
                     print(f"Error loading {filename}: {e}")
         
         return fragments
 
+    @staticmethod
+    def _save_obj_file(save_task):
+        """Helper function for parallel saving that can be pickled"""
+        try:
+            fragment, path = save_task
+            fragment.save(path)
+            return True
+        except Exception as e:
+            print(f"Error saving to {path}: {e}")
+            return False
+
     def saveAllFragments(self, frags, path, stem=None):
         """Save all fragments to their respective type files"""
         # Group fragments by type
         print("saving all fragments")
         fragment_groups = {}
+        trgl_save_tasks = []  # List to store (fragment, path) tuples for parallel saving
+        
         for frag in frags:
             if not hasattr(frag, "toDict"):
                 continue
@@ -1001,15 +1068,23 @@ class Project:
                     print("Could not convert created timestamp", frag.created, "to vc")
                     cfixed = frag.created.replace(':',"_").replace('.',"p")
                 obj_path = path / cfixed
-                # Save the OBJ file
-                frag.save(obj_path)
+                # Store task for parallel execution
+                trgl_save_tasks.append((frag, obj_path))
                 # Store the path for JSON reference
                 frag.obj_path = obj_path.with_suffix(".obj")
                 
             if frag_type not in fragment_groups:
                 fragment_groups[frag_type] = []
             fragment_groups[frag_type].append(frag.toDict())
-            
+        
+        # Save TrglFragments in parallel
+        if trgl_save_tasks:
+            print(f"Saving {len(trgl_save_tasks)} OBJ files using {get_io_threads()} threads...")
+            with ThreadPoolExecutor(max_workers=get_io_threads()) as executor:
+                # Use map instead of submit for simpler handling
+                results = list(executor.map(self._save_obj_file, trgl_save_tasks))
+                successful = sum(1 for r in results if r)
+                print(f"Successfully saved {successful} of {len(trgl_save_tasks)} OBJ files")
         
         # Save each group to its respective file
         type_to_file = {
