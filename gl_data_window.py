@@ -1651,7 +1651,7 @@ class GLDataWindowChild(QOpenGLWidget):
         self.indexed_fvs = []
         lines = []
         fvs = list(dw.fragmentViews())
-        print("fvs in drawFragments gl data window", len(fvs))
+        # print("fvs in drawFragments gl data window", len(fvs))
         if line_thickness == 0 or line_alpha == 0:
             fvs = []
         pv = dw.window.project_view

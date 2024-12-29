@@ -283,7 +283,8 @@ class ProjectView:
         # make sure echo fragments are updated
         for fv in self.fragments.values():
             # print("slp")
-            fv.setLocalPoints(True)
+            # Build adjacency list when updating fragment views
+            fv.setLocalPoints(True, True, True, True)
 
     def setCurrentVolume(self, volume, no_notify=False):
         if self.cur_volume != volume:

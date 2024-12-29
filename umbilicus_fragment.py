@@ -280,10 +280,11 @@ class UmbilicusFragmentView(FragmentView):
             self.fragment.gpoints = self.manual_points.copy()
             self.manual_point_indices = np.arange(len(self.manual_points))
         
-        self.setLocalPoints(True, False)
+        # Build adjacency list since we're adding a point
+        self.setLocalPoints(True, False, True, True)
         self.fragment.notifyModified()
 
-    def setLocalPoints(self, do_update=True, notify=True):
+    def setLocalPoints(self, do_update=True, notify=True, build_kdtrees=False, build_adjacency_list=False):
         """Override to handle manual and interpolated points"""
         # Initialize manual points from gpoints if not already set
         if self.manual_points is None and len(self.fragment.gpoints) > 0:
@@ -304,7 +305,7 @@ class UmbilicusFragmentView(FragmentView):
             self.manual_point_indices = np.arange(len(self.manual_points)) if self.manual_points is not None else np.array([], dtype=np.int32)
         
         # Now call parent's setLocalPoints with updated gpoints
-        super(UmbilicusFragmentView, self).setLocalPoints(do_update, notify, build_kdtrees=False)
+        super(UmbilicusFragmentView, self).setLocalPoints(do_update, notify, build_kdtrees, build_adjacency_list)
 
     def deletePointByIndex(self, index):
         """Override to handle both manual and interpolated points"""
@@ -338,7 +339,8 @@ class UmbilicusFragmentView(FragmentView):
                 self.manual_point_indices = np.arange(len(self.manual_points))
             
             self.fragment.notifyModified()
-            self.setLocalPoints(True, False)
+            # Build adjacency list since we're removing a point
+            self.setLocalPoints(True, False, True, True)
 
 class UmbilicusExporter:
     """Handles exporting of umbilicus fragments to various file formats"""

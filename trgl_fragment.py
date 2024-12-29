@@ -668,32 +668,42 @@ class TrglFragmentView(BaseFragmentView):
     # TODO: if cur_volume_view changed, unset working region
     # NOTE that Fragment.setLocalPoints sets stpoints,
     # but TrglFragment.setLocalPoints does not.
-    def setLocalPoints(self, recursion_ok=True, always_update_zsurfs=True):
-        # print("set local points")
+    def setLocalPoints(self, recursion_ok=True, always_update_zsurfs=True, build_kd_trees=False, build_adjacency_list=False):
+        """
+        Update local point coordinates and optionally rebuild spatial data structures.
+        
+        Args:
+            recursion_ok: Whether to allow recursive updates
+            always_update_zsurfs: Whether to always update z-surfaces
+            build_kd_trees: Whether to rebuild KD trees and spatial hash grid
+                          (should be False during dragging operations)
+            build_adjacency_list: Whether to rebuild adjacency list
+                                (should be True when topology changes: adding/removing nodes)
+        """
         self.local_points_modified = Utils.timestamp()
         if self.cur_volume_view is None:
             self.vpoints = np.zeros((0,4), dtype=np.float32)
             self.fpoints = self.vpoints
-            # self.working_vpoints = np.zeros((0,4), dtype=np.float32)
             self.setWorkingRegion(-1, 0.)
             return
-        # print("gpoints", self.fragment.gpoints)
+            
         self.vpoints = self.cur_volume_view.globalPositionsToTransposedIjks(self.fragment.gpoints)
         self.fpoints = self.vpoints
-        # self.tpoints = self.fragment.gtpoints.copy()
         self.fragment.direction = self.cur_volume_view.direction
         npts = self.vpoints.shape[0]
-        '''
-        if npts > 0:
-            indices = np.reshape(np.arange(npts), (npts,1))
-            # print(self.vpoints.shape, indices.shape)
-            self.vpoints = np.concatenate((self.vpoints, indices), axis=1)
-        '''
+        
         indices = np.reshape(np.arange(npts), (npts,1))
-        # print(self.vpoints.shape, indices.shape)
         self.vpoints = np.concatenate((self.vpoints, indices), axis=1)
+        
+        if recursion_ok:
+            if always_update_zsurfs:
+                self.setScaledTexturePoints()
+            # Pass through both build flags
+            self.buildKDTrees(True, 
+                            build_kd_tree=build_kd_trees,
+                            build_adjacency_list=build_adjacency_list,
+                            build_spatial_hash_grid=build_kd_trees)
         self.calculateSqCm()
-        # print("sqcm", self.sqcm)
         vv = self.cur_volume_view
         if vv.stxytf is not None:
             uvxytf = self.stxyToUv(vv.stxytf)
@@ -725,10 +735,10 @@ class TrglFragmentView(BaseFragmentView):
             # recursion_ok=True causes crash due to FragmentView.setLocalPoints
             # looping over project_view.fragments
             # print("before wfv slp")
-            self.working_fv.setLocalPoints(False)
+            self.working_fv.setLocalPoints(False, build_kd_trees=build_kd_trees, build_adjacency_list=build_adjacency_list)
             # print("after wfv slp")
 
-        super().buildKDTrees(recursion_ok)
+        # super().buildKDTrees(recursion_ok)
 
 
     '''
@@ -1054,7 +1064,7 @@ class TrglFragmentView(BaseFragmentView):
             self.fragment.trgls = state['trgls']
             self.sqcm = state['sqcm']
             self.fragment.notifyModified()
-            self.setLocalPoints(True, False)
+            self.setLocalPoints(True, False, build_kd_trees=True, build_adjacency_list=True)
             print("popFragmentState", len(self.gpoints_history))
 
     def setWorkingRegion(self, index, max_angle):
@@ -1237,7 +1247,6 @@ class TrglFragmentView(BaseFragmentView):
         # print("ra2", len(stp), len(all_pts), len(self.trgls()))
 
     def rebuildStPoints(self):
-        # self.setLocalPoints(True, False)
         self.stpoints = None
         # print("rsp set stpoints to None")
         self.setScaledTexturePoints()
@@ -1332,7 +1341,18 @@ class TrglFragmentView(BaseFragmentView):
         # print("Adjustment done")
         return constrained
 
-    def movePoint(self, index, new_vijk, update_xyz, update_st):
+    def movePoint(self, index, new_vijk, update_xyz, update_st, build_kd_trees=True, build_adjacency_list=False):
+        """
+        Move a single point to a new position.
+        
+        Args:
+            index: Index of point to move
+            new_vijk: New position in volume coordinates
+            update_xyz: Whether to update xyz coordinates
+            update_st: Whether to update st coordinates
+            build_kd_trees: Whether to rebuild KD trees (False during dragging)
+            build_adjacency_list: Whether to rebuild adjacency list
+        """
         timer = Utils.Timer()
         timer.active = False
         vv = self.cur_volume_view
@@ -1397,16 +1417,26 @@ class TrglFragmentView(BaseFragmentView):
                 self.sqcm = old_sqcm
 
         self.fragment.notifyModified()
-        self.buildKDTrees(True, False)  # Explicitly rebuild KD trees without updating adjacency
+        # Only rebuild KD trees if requested (not during dragging)
+        if build_kd_trees:
+            self.buildKDTrees(True, build_kd_trees, 
+                             build_adjacency_list=build_adjacency_list,
+                             build_spatial_hash_grid=build_kd_trees)
         return True
 
-    def movePoints(self, indices, new_vijks, update_xyz, update_st):
+    def movePoints(self, indices, new_vijks, update_xyz, update_st, build_kd_trees=True, build_adjacency_list=False):
         """
-        Efficiently move multiple points at once while preserving node connectivity.
+        Move multiple points to new positions.
+        
+        Args:
+            indices: Array of point indices to move
+            new_positions: Array of new positions
+            update_xyz: Whether to update xyz coordinates
+            update_st: Whether to update st coordinates
+            build_kd_trees: Whether to rebuild KD trees (False during dragging)
         """
         timer = Utils.Timer()
-        timer.active = False # Enable timing
-        
+        timer.active = False
         vv = self.cur_volume_view
         print("move points called, saving undo state")
         # Save current state for undo
@@ -1452,7 +1482,10 @@ class TrglFragmentView(BaseFragmentView):
             timer.time("Update st")
 
         self.fragment.notifyModified()
-        self.buildKDTrees(True, False)  # Explicitly rebuild KD trees without updating adjacency
+        if build_kd_trees:
+            self.buildKDTrees(True, build_kd_trees, 
+                             build_adjacency_list=build_adjacency_list,
+                             build_spatial_hash_grid=build_kd_trees)  # Explicitly rebuild KD trees without updating adjacency
         timer.time("Notify modified")
         return True
 
@@ -1608,24 +1641,13 @@ class TrglFragmentView(BaseFragmentView):
         # tcount will be zero if the new point has no triangles,
         # non-zero otherwise
         tcount = (self.fragment.trgls==nstp).any(axis=1).sum()
-        # tcount = (self.fragment.trgls==nstp).sum()
-        # print("TrglFragment addPoint tcount", tcount)
-        '''
-        if tcount > 0 and constrained:
-            # prevent setScaledTexturePoints from running
-            # when setLocalPoints is called
-            self.prev_pt_count = len(self.fragment.gpoints)
-        timer.time("tcount")
 
-        self.setLocalPoints(True, False)
-        timer.time("set local")
-        '''
         if tcount > 0 and constrained and nps2match:
             self.addLocalPoint(nstp)
         else:
             if not nps2match:
                 print("addPoint: set local points", tcount, constrained, nps2match)
-            self.setLocalPoints(True, False)
+            self.setLocalPoints(True, False, build_kd_trees=True, build_adjacency_list=True)
         # print("a after", self.maxEdgeLengthAll())
         self.fragment.notifyModified()
 
@@ -1745,7 +1767,7 @@ class TrglFragmentView(BaseFragmentView):
         self.fragment.gtpoints = self.fragment.gtpoints[~free_flag]
         self.stpoints = self.stpoints[~free_flag]
         self.all_stpoints = np.concatenate((self.stpoints, old_outside))
-        self.setLocalPoints(True, False)
+        self.setLocalPoints(True, False, build_kd_trees=True, build_adjacency_list=True)
 
     def deletePointByIndex(self, index):
         if index < 0:
@@ -1814,7 +1836,7 @@ class TrglFragmentView(BaseFragmentView):
         if not (constrained and nps2match):
             if not nps2match:
                 print("deletePointByIndex: set local points", constrained, nps2match)
-            self.setLocalPoints(True, False)
+            self.setLocalPoints(True, False, build_kd_trees=True, build_adjacency_list=True)
 
         # Clear selected nodes after deletion
         if hasattr(self, 'selected_nodes'):

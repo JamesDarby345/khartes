@@ -2513,9 +2513,9 @@ class MainWindow(QMainWindow):
         cur_frag_view.normal_offset = offset
         self.drawSlices()
 
-    def movePoint(self, fragment_view, index, new_tijk, update_xyz, update_st):
+    def movePoint(self, fragment_view, index, new_tijk, update_xyz, update_st, build_kd_trees=True, build_adjacency_list=False):
         self.fragments_table.model().beginResetModel()
-        result = fragment_view.movePoint(index, new_tijk, update_xyz, update_st)
+        result = fragment_view.movePoint(index, new_tijk, update_xyz, update_st, build_kd_trees, build_adjacency_list)
         self.fragments_table.model().endResetModel()
         return result
 
@@ -3652,7 +3652,8 @@ class MainWindow(QMainWindow):
         self.fragments_table.model().beginResetModel()
         fragment_view.mesh_visible = mesh_visible
         fragment_view.clearCaches()
-        fragment_view.setLocalPoints(True)
+        # Build adjacency list when changing mesh visibility
+        fragment_view.setLocalPoints(True, True, True, True)
 
         fragment_view.notifyModified()
         self.fragments_table.model().endResetModel()

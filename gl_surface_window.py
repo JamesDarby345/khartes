@@ -334,7 +334,7 @@ class GLSurfaceWindow(DataWindow):
         timer.time("Convert to transposed ijk")
         
         # Instead of using super().setNearbyNodeIjk, directlymove the point
-        if self.window.movePoint(fv, index, nijk, update_xyz, update_st):
+        if self.window.movePoint(fv, index, nijk, update_xyz, update_st, build_kd_trees=False):
             # Update the OpenGL rendering
             self.glw.update()
             timer.time("Update GL window")
@@ -366,12 +366,12 @@ class GLSurfaceWindow(DataWindow):
             # Move all points at once if possible
             if hasattr(fv, 'movePoints'):
                 print("movePoints", len(selected_indices))
-                fv.movePoints(selected_indices, selected_nijks, update_xyz, update_st=False)
+                fv.movePoints(selected_indices, selected_nijks, update_xyz, update_st=False, build_kd_trees=False)
             else:
                 # Fallback to individual moves if batch move not available
                 print("falling back to movePoint", len(selected_indices))
                 for idx, new_pos in zip(selected_indices, selected_nijks):
-                    fv.movePoint(idx, new_pos, update_xyz, update_st)
+                    fv.movePoint(idx, new_pos, update_xyz, update_st, build_kd_trees=False)
                 
             timer.time("Move selected nodes")
             

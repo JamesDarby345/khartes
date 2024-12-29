@@ -1047,9 +1047,18 @@ class FragmentView(BaseFragmentView):
     # fragment views have had their current volume view set.
     # NOTE that Fragment.setLocalPoints sets stpoints,
     # but TrglFragment.setLocalPoints does not.
-    def setLocalPoints(self, recursion_ok, always_update_zsurf=True, build_kdtrees=True):
-        # print("set local points", self.cur_volume_view.volume.name)
-        # print("set local points", self.fragment.name)
+    def setLocalPoints(self, recursion_ok, always_update_zsurf=True, build_kdtrees=False, build_adjacency_list=False):
+        """
+        Update local point coordinates and optionally rebuild spatial data structures.
+        
+        Args:
+            recursion_ok: Whether to allow recursive updates
+            always_update_zsurf: Whether to always update z-surfaces
+            build_kdtrees: Whether to rebuild KD trees and spatial hash grid
+                         (should be False during dragging operations)
+            build_adjacency_list: Whether to rebuild adjacency list
+                               (should be True when topology changes: adding/removing nodes)
+        """
         self.local_points_modified = Utils.timestamp()
         if self.cur_volume_view is None:
             self.fpoints = np.zeros((0,4), dtype=np.float32)
@@ -1062,83 +1071,55 @@ class FragmentView(BaseFragmentView):
             self.fpoints = np.concatenate((self.fpoints, indices), axis=1)
 
         self.vpoints = self.cur_volume_view.volume.globalPositionsToTransposedIjks(self.fragment.gpoints, self.cur_volume_view.direction)
-        # self.stpoints = self.vpoints[:,0:2]
-        # self.stpoints = self.fpoints[:,0:2]
         gai = self.cur_volume_view.volume.globalAxisFromTransposedAxis(0, self.fragment.direction)
         gaj = self.cur_volume_view.volume.globalAxisFromTransposedAxis(1, self.fragment.direction)
         self.stpoints = self.fragment.gpoints[:,(gai,gaj)]
         self.normals = np.zeros((npts, 3), dtype=np.float32)
         self.normals[:,2] = -1.
-        # self.xyzmin = (0.,0.,0.)
-        # self.xyzmin = (0.,0.,0.)
         self.working_vpoints = np.full((len(self.vpoints),),True)
         self.working_trgls = np.full((0,),True)
         npts = self.vpoints.shape[0]
-        '''
-        if npts > 0:
-            indices = np.reshape(np.arange(npts), (npts,1))
-            # print(self.vpoints.shape, indices.shape)
-            self.vpoints = np.concatenate((self.vpoints, indices), axis=1)
-            # print(self.vpoints[0])
-        '''
         indices = np.reshape(np.arange(npts), (npts,1))
         self.vpoints = np.concatenate((self.vpoints, indices), axis=1)
-        ''''''
         if not self.mesh_visible:
             self.zsurf = None
             self.ssurf = None
             self.tri = None
             return
-        # print("set fpoints and vpoints")
-        # print ("creating zsurf for", self.fragment.name)
-        # if always_update_zsurf or self.live_zsurf_update:
-        #     self.createZsurf()
-        # print("created zsurf")
-        # else:
-        #     self.triangulate()
-        # print("before czs")
         self.createZsurf(always_update_zsurf or self.live_zsurf_update)
-        # print("after czs")
         self.calculateSqCm()
         ntrgl = 0
         if self.tri is not None:
             ntrgl = len(self.tri.simplices)
         self.working_trgls = np.full((ntrgl,),True)
-        # print("calculated sq cm")
         if build_kdtrees:
-            super().buildKDTrees(recursion_ok)
+            super().buildKDTrees(recursion_ok, build_kd_tree=build_kdtrees, 
+                               build_adjacency_list=build_adjacency_list,
+                               build_spatial_hash_grid=build_kdtrees)
         if not recursion_ok:
             return
         for fv in self.project_view.fragments.values():
             echo = fv.fragment.params.get('echo', '')
             if echo == self.fragment.name:
                 fv.echoPointsFrom(self)
-                fv.setLocalPoints(True, always_update_zsurf)
+                fv.setLocalPoints(True, always_update_zsurf, build_kdtrees, build_adjacency_list)
 
     def setLiveZsurfUpdate(self, lzu):
         if lzu == self.live_zsurf_update:
             return
         self.live_zsurf_update = lzu
-        if lzu:
-            self.setLocalPoints(True)
+        # Don't rebuild adjacency list when just updating z-surface
+        self.setLocalPoints(True, True, False, False)
 
     def echoPointsFrom(self, orig):
         # print("echo from",orig.fragment.name,"to",self.fragment.name)
-        print("echo from %s (%d) to %s (%d)"%(
-            orig.fragment.name, len(orig.fragment.gpoints),
-            self.fragment.name, len(self.fragment.gpoints),))
-        params = self.fragment.params
-        self.fragment.gpoints = np.copy(orig.fragment.gpoints)
-        infill = params.get("infill", 0)
-        if self.cur_volume_view is None:
-            self.cur_volume_view = orig.cur_volume_view
-        if infill > 0 and self.cur_volume_view is not None:
-            print("infill",infill)
-            vol = self.cur_volume_view.volume
-            print("vol", vol.name)
-            newgijks = self.fragment.createInfillPoints(infill)
-            self.fragment.gpoints = np.append(self.fragment.gpoints, newgijks, axis=0)
-            self.setLocalPoints(True)
+        self.fragment.gpoints = orig.fragment.gpoints.copy()
+        self.fragment.gtpoints = orig.fragment.gtpoints.copy()
+        self.fragment.trgls = orig.fragment.trgls.copy()
+        self.fragment.direction = orig.fragment.direction
+        self.fragment.notifyModified()
+        # Don't rebuild adjacency list when just echoing points
+        self.setLocalPoints(True, True, False, False)
 
     # given node indices and a triangulation, return a list of the
     # neighboring node indices, plus the input node indices themselves
@@ -1820,7 +1801,7 @@ class FragmentView(BaseFragmentView):
         self.pushFragmentState()
         self.fragment.gpoints = np.append(self.fragment.gpoints, np.reshape(gijk, (1,3)), axis=0)
         # print(self.lpoints)
-        self.setLocalPoints(True, False)
+        self.setLocalPoints(True, False, True, True)
         self.fragment.notifyModified()
 
     def deletePointByIndex(self, index):
@@ -1828,7 +1809,7 @@ class FragmentView(BaseFragmentView):
             self.pushFragmentState()
             self.fragment.gpoints = np.delete(self.fragment.gpoints, index, 0)
         self.fragment.notifyModified()
-        self.setLocalPoints(True, False)
+        self.setLocalPoints(True, False, True, True)
 
     def workingTrgls(self):
         return self.working_trgls
@@ -1854,64 +1835,36 @@ class FragmentView(BaseFragmentView):
     # return True if succeeds, False if fails
     # Note that update_xyz and update_st are ignored here;
     # st is always updated due to the call to FragmentView.setLocalPoints() 
-    def movePoint(self, index, new_vijk, update_xyz, update_st):
+    def movePoint(self, index, new_vijk, update_xyz, update_st, build_kd_trees=True, build_adjacency_list=False):
         # print("mp a")
-        old_fijk = self.fpoints[index]
-        new_fijk = self.vijkToFijk(new_vijk)
-        new_matches = np.where((np.rint(self.fpoints[:, 0:2]) == np.rint(new_fijk[0:2])).all(axis=1))[0]
-        if (round(old_fijk[0]) != round(new_fijk[0]) or round(old_fijk[1]) != round(new_fijk[1])) and new_matches.shape[0] > 0:
-            print("movePoint point already exists at this ij", new_vijk)
-            return False
-        # print("mp b")
-        new_gijk = self.cur_volume_view.transposedIjkToGlobalPosition(new_vijk)
-        # print("mp b2")
-        # print(self.fragment.gpoints)
-        # print(match, new_gijk)
-        self.pushFragmentState()
-        # print("mp c")
-        self.fragment.gpoints[index, :] = new_gijk
-        # print(self.fragment.gpoints)
-        self.fragment.notifyModified()
-        # NOTE that this will set stpoints as well as fpoints and vpoints
-        self.setLocalPoints(True, False)
-        # print("mp d")
-        return True
+        if update_xyz:
+            # print("mp b")
+            gijk = self.cur_volume_view.volume.transposedIjkToGlobalPosition(new_vijk)
+            # print("mp c")
+            self.fragment.gpoints[index, :] = gijk
+            # print("mp d")
+            self.fragment.notifyModified()
+            # print("mp e")
+            # Don't rebuild adjacency list when just moving a point
+            self.setLocalPoints(True, False, build_kd_trees, build_adjacency_list)
+            # print("mp f")
 
     def pushFragmentState(self):
-        """Push the current list of gpoints onto the stack in preparation for changing gpoints."""
-        gpoints_copy = np.copy(self.fragment.gpoints)
-        self.fragment.gpoints_history.append(gpoints_copy)
+        # print("push fragment state")
+        self.fragment.pushState()
 
     def popFragmentState(self):
-        """Replace current gpoints with top of the stack, and update."""
-        hist_size =  len(self.fragment.gpoints_history)
-        if hist_size > 0:
-            self.fragment.gpoints = self.fragment.gpoints_history.pop()
-            self.fragment.notifyModified()
-            self.setLocalPoints(True, False)
+        # print("pop fragment state")
+        self.fragment.popState()
+        self.setLocalPoints(True, False, True, True)
 
     def pushFragmentStateOld(self):
-        """Push the current list of gpoints onto the stack in preparation for changing gpoints."""
-        # print("pfs a")
-        gpoints_copy = np.copy(self.fragment.gpoints)
-        # print("pfs b")
-        try:
-            self.fragment.gpoints_history.put(gpoints_copy, block=False)
-        except:
-            # print("pfs e")
-            self.fragment.gpoints_history.get()
-            self.fragment.gpoints_history.put(gpoints_copy, block=False)
-        # print("pfs c")
+        # print("push fragment state")
+        self.fragment.pushStateOld()
 
     def popFragmentStateOld(self):
-        """Replace current gpoints with top of the stack, and update."""
-        hist_size=  self.fragment.gpoints_history.qsize()
-        if hist_size > 0:
-            try:
-                self.fragment.gpoints = self.fragment.gpoints_history.get(block=False)
-            except:
-                return
-            self.fragment.notifyModified()
-            self.setLocalPoints(True, False)
+        # print("pop fragment state")
+        self.fragment.popStateOld()
+        self.setLocalPoints(True, False, True, True)
 
 

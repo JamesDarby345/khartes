@@ -17,7 +17,7 @@ class Khartes():
         self.app = app
         self.window = window
         window.show()
-        # window.loadProject("/Users/jamesdarby/Documents/VesuviusScroll/GP/khartes/khartes_project/overlay_testing.khprj")
+        window.loadProject("/Users/jamesdarby/Documents/VesuviusScroll/GP/khartes/khartes_project/overlay_testing.khprj")
 
 fmt = QSurfaceFormat()
 # Note that pyQt5 only supports OpenGL versions 2.0, 2.1, and 4.1 Core :

@@ -345,8 +345,6 @@ class DataWindow(QLabel):
                 if alt_pressed:
                     # Alt is pressed: Use sticky move logic
                     new_positions = self.stickyMove(old_positions, delta, bbox_size=20)
-                    print("sticky move new_positions", new_positions)
-                    # new_positions = old_positions + delta
                 elif ctrl_pressed:
                     # Ctrl is pressed: Use proportional movement logic
                     dists = np.sqrt((diffs * diffs).sum(axis=1))
@@ -365,11 +363,12 @@ class DataWindow(QLabel):
                     new_positions = old_positions + delta
 
                 self.setWaitCursor()
-                success = fv.movePoints(indices, new_positions, update_xyz, update_st=False)
+                # Don't rebuild KD trees during dragging
+                success = fv.movePoints(indices, new_positions, update_xyz, update_st=False, build_kd_trees=False, build_adjacency_list=False)
             else:
                 self.setWaitCursor()
-                # No special logic if node isn't in selected nodes or no selection: just move the single node
-                success = self.window.movePoint(fv, index, new_tijk, update_xyz, update_st)
+                # Don't rebuild KD trees during dragging
+                success = self.window.movePoint(fv, index, new_tijk, update_xyz, update_st, build_kd_trees=False)
             
             self.window.setLiveZsurfUpdate(True)
 
@@ -778,20 +777,27 @@ class DataWindow(QLabel):
         cv2.circle(outrgbx, xy, size, color, -1)
 
     def mouseReleaseEvent(self, e):
+        print("mouseReleaseEvent")
         if self.volume_view is None:
             return
-        # print("release", e.button())
+            
         if e.button() | Qt.LeftButton:
+            
             self.mouseStartPoint = QPoint()
             self.tfStartPoint = None
             self.nnStartPoint = None
+            
+            # If we were moving nodes, rebuild KD trees now
+            if self.isMovingNode:
+                fv = self.currentFragmentView()
+                if fv:
+                    fv.buildKDTrees(True, True, build_adjacency_list=True, build_spatial_hash_grid=True)
+                
             self.isPanning = False
             self.isMovingNode = False
             self.isMovingTiff = False
             wpos = e.localPos()
             wxy = (wpos.x(), wpos.y())
-            # nearbyNode = self.findNearbyNode(wxy)
-            # self.setNearbyNode(nearbyNode)
             self.setNearbyTiffAndNode(wxy)
         self.checkCursor()
 
@@ -1028,7 +1034,8 @@ class DataWindow(QLabel):
             nij[1] += dj
             self.window.drawSlices()
             self.setWaitCursor()
-            self.setNearbyNodeIjk(nij, True, True)
+            # Don't rebuild KD trees during dragging
+            self.setNearbyNodeIjk(nij, True, False)
             self.window.drawSlices()
         elif self.isMovingTiff:
             if self.ntStartPoint is None:
@@ -1433,6 +1440,31 @@ class DataWindow(QLabel):
         elif e.key() == Qt.Key_P or e.key() == Qt.Key_F:  # Use 'P' key to toggle paint mode
             self.togglePaintMode()
             return
+        elif not self.isMovingNode and key == Qt.Key_K:
+            # Get the current fragment and nearby node
+            pv = self.window.project_view
+            if pv is None or pv.nearby_node_fv is None or pv.nearby_node_index < 0:
+                return
+                
+            fv = pv.nearby_node_fv
+            nearby_node_idx = pv.nearby_node_index
+            
+            # Get the axis value of the nearby node
+            if nearby_node_idx >= len(fv.vpoints):
+                return
+                
+            nearby_node = fv.vpoints[nearby_node_idx]
+            axis_value = nearby_node[self.axis]
+            
+            # Find all nodes that share this axis value
+            nodes_on_axis = np.where(np.abs(fv.vpoints[:, self.axis] - axis_value) < 1)[0]
+            
+            # Update the selected nodes
+            fv.selected_nodes = set(nodes_on_axis)
+            
+            # Redraw to show the selection
+            self.window.drawSlices()
+            
         self.setStatusTextFromMousePosition()
         self.checkCursor()
 
@@ -2535,6 +2567,7 @@ into and out of the viewing plane.
         self.checkCursor()
 
     def mouseReleaseEvent(self, e):
+        print("mouseReleaseEvent")
         if self.paint_mode and e.button() == Qt.LeftButton:
             self.is_painting = False
             if len(self.stroke_points) > 20:
@@ -2552,13 +2585,18 @@ into and out of the viewing plane.
             self.mouseStartPoint = QPoint()
             self.tfStartPoint = None
             self.nnStartPoint = None
+            
+            # If we were moving nodes, rebuild KD trees now
+            if self.isMovingNode:
+                fv = self.currentFragmentView()
+                if fv:
+                    fv.buildKDTrees(True, True, build_adjacency_list=True, build_spatial_hash_grid=True)
+                
             self.isPanning = False
             self.isMovingNode = False
             self.isMovingTiff = False
             wpos = e.localPos()
             wxy = (wpos.x(), wpos.y())
-            # nearbyNode = self.findNearbyNode(wxy)
-            # self.setNearbyNode(nearbyNode)
             self.setNearbyTiffAndNode(wxy)
         self.checkCursor()
 

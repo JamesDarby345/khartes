@@ -1,4 +1,3 @@
-
 import time
 from utils import Utils
 import numpy as np
@@ -263,7 +262,8 @@ class BaseFragmentView:
         self.cur_volume_view = vol_view
         self.clearCaches()
         if vol_view is not None:
-            self.setLocalPoints(False)
+            # Don't rebuild adjacency list when just changing volume view
+            self.setLocalPoints(False, True, False, False)
 
     def notifyModified(self, tstamp=""):
         if tstamp == "":
@@ -338,7 +338,8 @@ class BaseFragmentView:
     # to recompute things
     def setVolumeViewDirection(self, direction):
         self.clearCaches()
-        self.setLocalPoints(False)
+        # Don't rebuild adjacency list when just changing direction
+        self.setLocalPoints(False, True, False, False)
 
     def clearCaches(self):
         return None
@@ -373,7 +374,8 @@ class BaseFragmentView:
         self.fpoints[:, :3] += sgn*step*ns
         self.fragment.gpoints = self.cur_volume_view.volume.transposedIjksToGlobalPositions(self.fpoints, self.fragment.direction)
         self.fragment.notifyModified()
-        self.setLocalPoints(True)
+        # Don't rebuild adjacency list when just moving along normals
+        self.setLocalPoints(True, True, True, False)
 
     def moveInK(self, step):
         # if len(self.fpoints) > 0:
@@ -383,7 +385,8 @@ class BaseFragmentView:
         # if len(self.fpoints) > 0:
         #     print("after", self.fragment.gpoints[0], self.fpoints[0])
         self.fragment.notifyModified()
-        self.setLocalPoints(True)
+        # Don't rebuild adjacency list when just moving in K
+        self.setLocalPoints(True, True, True, False)
 
     # returns 3 axes: axis along increasing stx, axis along increasing sty,
     # normal.  The 3 axes are orthonormal.
@@ -497,7 +500,8 @@ class BaseFragmentView:
         
         return axes_list
 
-    def buildKDTrees(self, recursion_ok, build_adjacency_list=True, build_spatial_hash_grid=True):
+    def buildKDTrees(self, recursion_ok, build_kd_tree=True, build_adjacency_list=True, build_spatial_hash_grid=True):
+        print("buildKDTrees", recursion_ok, build_kd_tree, build_adjacency_list, build_spatial_hash_grid)
         if not recursion_ok:
             return
         print("fragment datastructures; adj list, kdtree, spatial hash grid")
@@ -514,21 +518,32 @@ class BaseFragmentView:
                 print("building adjacency list")
                 stime = time.time()
                 self.adjacency_list = [set() for _ in range(len(self.vpoints))]
-                for tri in trgls:
-                    a, b, c = tri
-                    self.adjacency_list[a].update([b, c])
-                    self.adjacency_list[b].update([a, c])
-                    self.adjacency_list[c].update([a, b])
+                
+                # Check if trgls contains triangles (3 vertices each) or just indices
+                if len(trgls.shape) > 1 and trgls.shape[1] == 3:
+                    # Handle triangulated mesh
+                    for tri in trgls:
+                        a, b, c = tri
+                        self.adjacency_list[a].update([b, c])
+                        self.adjacency_list[b].update([a, c])
+                        self.adjacency_list[c].update([a, b])
+                else:
+                    # Handle line segments (like umbilicus)
+                    for i in range(len(trgls)-1):
+                        self.adjacency_list[i].add(i+1)
+                        self.adjacency_list[i+1].add(i)
+                        
                 print("adjacency list built in", time.time() - stime)
             else:
                 self.adjacency_list = None
         
         # Build KD tree using global xyz coordinates
         if hasattr(self, 'fragment') and hasattr(self.fragment, 'gpoints'):
-            print("building kd tree")
-            stime = time.time()
-            self.kd_tree = KDTree(self.fragment.gpoints)
-            print("kd tree built in", time.time() - stime)
+            if build_kd_tree:   
+                print("building kd tree")
+                stime = time.time()
+                self.kd_tree = KDTree(self.fragment.gpoints)
+                print("kd tree built in", time.time() - stime)
 
             if build_spatial_hash_grid:
                 print("building spatial hash grid")
