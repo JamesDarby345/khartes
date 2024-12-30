@@ -690,6 +690,7 @@ class DataWindow(QLabel):
         return self.volume_view.zoom * self.zoomMult
 
     def allowMouseToDragNode(self):
+        return False #temporarily disable node dragging
         return True
 
     def computeTfStartPoint(self):
@@ -2617,36 +2618,37 @@ into and out of the viewing plane.
         #axis 2 = y
 
         # Convert stroke points to numpy array - they are in data coordinates (i,j)
-        stroke = np.array(self.stroke_points)
-        
-        # Sample every 2nd point from the stroke to reduce queries
-        # this is not a good idea, because it can miss nodes, sample all
-        stride = 1
-        sampled_points = stroke[::stride]
+        sampled_points = np.array(self.stroke_points)
         
         # Convert sampled ij points to tijk coordinates for kdtree query
         query_points = np.zeros((len(sampled_points), 3))
-        k = self.positionOnAxis()
         for i, point in enumerate(sampled_points):
             tijk = self.ijToTijk(point)
             query_points[i] = tijk
 
         print("query points", query_points.shape, query_points[0])
         global_query_points = self.volume_view.volume.transposedIjksToGlobalPositions(query_points, self.axis)
-        # Use paint cursor radius for kdtree search
+        
+        # Scale cursor radius by zoom level to match what's shown on screen
+        zoom = self.getZoom()
+        print("zoom", zoom)
+        scaled_radius = self.paint_cursor_radius / zoom
         print("global_query_points", global_query_points.shape, global_query_points[0])
-        current_frag.updateSelectedNodesFromPoints(global_query_points, self.paint_cursor_radius)
+        current_frag.updateSelectedNodesFromPoints(global_query_points, scaled_radius)
         
         # arc logic only relevant for z-axis on trgl_fragments
         if current_frag.fragment.type == BaseFragment.Type.TRGL_FRAGMENT and self.axis == 1:
             # Find dominant wrap in selection
-            current_frag.findDominantWrap2D()
+            success = current_frag.findDominantWrap3D(scaled_radius, self.positionOnAxis())
+            if not success:
+                print("failed to find a dominant wrap")
+                return
             # Find nodes within the brush arc
-            arc_nodes = current_frag.findNodesInBrushArc(sampled_points, self.paint_cursor_radius, self.positionOnAxis())
-            if arc_nodes:
-                # Update selected nodes to only those within the arc
-                current_frag.selected_nodes = arc_nodes
-                current_frag.moveSelectedNodesToBrushArc(sampled_points, self.paint_cursor_radius, self.positionOnAxis())
+            # arc_nodes = current_frag.findNodesInBrushArc(sampled_points, self.paint_cursor_radius, self.positionOnAxis())
+            # if arc_nodes:
+            #     # Update selected nodes to only those within the arc
+            #     current_frag.selected_nodes = arc_nodes
+            #     current_frag.moveSelectedNodesToBrushArc(sampled_points, self.paint_cursor_radius, self.positionOnAxis())
 
     def point_to_line_distance(self, p, a, b):
         """Calculate distance from point p to line segment ab"""

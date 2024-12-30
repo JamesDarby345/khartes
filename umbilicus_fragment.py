@@ -10,8 +10,10 @@ from PyQt5.QtWidgets import (
         QGroupBox,
         QMessageBox,
         QVBoxLayout, 
-        QRadioButton
+        QRadioButton,
+        QListWidget, QListWidgetItem
         )
+from PyQt5.QtCore import Qt
 
 
 class UmbilicusFragment(Fragment):
@@ -88,6 +90,28 @@ class UmbilicusFragment(Fragment):
         info['type'] = self.type.value if self.type else Fragment.Type.UMBILICUS.value
         info['gpoints'] = self.gpoints.tolist()
         return info
+
+    @staticmethod
+    def add_points_to_fragment(umbilicus_fragment_view, target_fragment):
+        """Add umbilicus points to target fragment's params"""
+        if not hasattr(umbilicus_fragment_view, 'manual_points') or umbilicus_fragment_view.manual_points is None:
+            raise ValueError("Selected umbilicus fragment has no points.")
+            
+        # Initialize or update umbilicus_points in target fragment's params
+        if not hasattr(target_fragment, 'params'):
+            target_fragment.params = {}
+            
+        # Create dictionary mapping z-values to points
+        points_dict = {}
+        for point in umbilicus_fragment_view.manual_points:
+            z_val = int(round(point[2]))  # Round z-value to nearest integer
+            points_dict[z_val] = point.tolist() # Convert numpy array to list
+            
+        # Store points in fragment params
+        target_fragment.params['umbilicus_points'] = points_dict
+        target_fragment.notifyModified()
+        
+        return len(points_dict)
 
 class UmbilicusFragmentView(FragmentView):
     def __init__(self, project_view, fragment):
@@ -509,3 +533,47 @@ class UmbilicusImporter:
         except Exception as e:
             QMessageBox.warning(self.parent, 'Import Error', str(e))
             return None
+
+class UmbilicusSelectionDialog(QDialog):
+    def __init__(self, project_view, parent=None):
+        super(UmbilicusSelectionDialog, self).__init__(parent)
+        self.project_view = project_view
+        self.selected_fragment = None
+        
+        self.setWindowTitle("Select Umbilicus Fragment")
+        layout = QVBoxLayout()
+        
+        # Create list widget for umbilicus fragments
+        self.list_widget = QListWidget()
+        self.list_widget.setSelectionMode(QListWidget.SingleSelection)
+        
+        # Populate list with umbilicus fragments
+        for fragment in project_view.fragments.keys():
+            if hasattr(fragment, 'is_umbilicus') and fragment.is_umbilicus:
+                item = QListWidgetItem(fragment.name)
+                item.setData(Qt.UserRole, fragment)
+                self.list_widget.addItem(item)
+        
+        layout.addWidget(self.list_widget)
+        
+        # Add OK/Cancel buttons
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+        self.setLayout(layout)
+        
+    def accept(self):
+        current_item = self.list_widget.currentItem()
+        if current_item:
+            self.selected_fragment = current_item.data(Qt.UserRole)
+            super(UmbilicusSelectionDialog, self).accept()
+        else:
+            QMessageBox.warning(self, "Selection Required", 
+                              "Please select an umbilicus fragment.")
+
+    def getSelectedFragment(self):
+        return self.selected_fragment

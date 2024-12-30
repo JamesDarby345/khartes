@@ -501,10 +501,10 @@ class BaseFragmentView:
         return axes_list
 
     def buildKDTrees(self, recursion_ok, build_kd_tree=True, build_adjacency_list=True, build_spatial_hash_grid=True):
-        print("buildKDTrees", recursion_ok, build_kd_tree, build_adjacency_list, build_spatial_hash_grid)
+        # print("buildKDTrees", recursion_ok, build_kd_tree, build_adjacency_list, build_spatial_hash_grid)
         if not recursion_ok:
             return
-        print("fragment datastructures; adj list, kdtree, spatial hash grid")
+        # print("fragment datastructures; adj list, kdtree, spatial hash grid")
         if not hasattr(self, 'vpoints') or self.vpoints is None or len(self.vpoints) == 0:
             self.kd_tree = None
             self.adjacency_list = None
@@ -515,7 +515,7 @@ class BaseFragmentView:
         trgls = self.trgls()
         if build_adjacency_list:
             if trgls is not None and len(trgls) > 0:
-                print("building adjacency list")
+                # print("building adjacency list")
                 stime = time.time()
                 self.adjacency_list = [set() for _ in range(len(self.vpoints))]
                 
@@ -533,23 +533,23 @@ class BaseFragmentView:
                         self.adjacency_list[i].add(i+1)
                         self.adjacency_list[i+1].add(i)
                         
-                print("adjacency list built in", time.time() - stime)
+                # print("adjacency list built in", time.time() - stime)
             else:
                 self.adjacency_list = None
         
         # Build KD tree using global xyz coordinates
         if hasattr(self, 'fragment') and hasattr(self.fragment, 'gpoints'):
             if build_kd_tree:   
-                print("building kd tree")
+                # print("building kd tree")
                 stime = time.time()
                 self.kd_tree = KDTree(self.fragment.gpoints)
-                print("kd tree built in", time.time() - stime)
+                # print("kd tree built in", time.time() - stime)
 
             if build_spatial_hash_grid:
-                print("building spatial hash grid")
+                # print("building spatial hash grid")
                 stime = time.time()
                 self.spatial_hash_grid = SpatialHashGrid(self.fragment.gpoints, thickness=10)
-                print("spatial hash grid built in", time.time() - stime)
+                # print("spatial hash grid built in", time.time() - stime)
 
     def updateSelectedNodes(self, point_index, k=None, radius=None, use_3d=False):
         """

@@ -2083,7 +2083,293 @@ class TrglFragmentView(BaseFragmentView):
         return nodes_in_arc
 
 
-    # def moveSelectedNodesToBrushArc(self):
+    # def findDominantWrap3D(self, brush_radius, z_val):
+    #     # Initial validation checks remain the same
+    #     if not hasattr(self.fragment, 'params') or self.fragment.params is None:
+    #         print("Missing params")
+    #         return None
+        
+    #     if not hasattr(self, 'selected_nodes') or not self.selected_nodes:
+    #         print("no selected_nodes")
+    #         return None
+
+    #     if not hasattr(self, 'adjacency_list') or self.adjacency_list is None:
+    #         print("no adjacency_list")
+    #         return None
+        
+    #     if 'umbilicus_points' not in self.fragment.params or self.fragment.params['umbilicus_points'] is None:
+    #         print("Missing umbilicus_points")
+    #         return None
+        
+    #     umbilicus_points_3d = self.fragment.params['umbilicus_points'][z_val-brush_radius:z_val+brush_radius]
+
+
+    def findDominantWrap3D(self, brush_radius, z_val):
+        """
+        A generalized 3D version of the 'findDominantWrap2D'. 
+        Tries to find a 'dominant wrap' among the nodes selected by a 3D brushstroke.
+
+        :param brush_radius: (float) The radius of the brush stroke,
+                            used to define which z-values and nodes are in-range.
+        :param z_val:       (float) The principal z-value around which the brush was drawn.
+        :return:            (set)   A set of node indices that form the 'dominant wrap', 
+                                    or None if not found.
+        """
+
+        # --------------------------------------------------------------------------
+        # 1) Validate needed attributes and parameters
+        # --------------------------------------------------------------------------
+        if not hasattr(self.fragment, 'params') or self.fragment.params is None:
+            print("Missing params")
+            return None
+        
+        if not hasattr(self, 'selected_nodes') or not self.selected_nodes:
+            print("no selected_nodes")
+            return None
+
+        if not hasattr(self, 'adjacency_list') or self.adjacency_list is None:
+            print("no adjacency_list")
+            return None
+
+        if ('umbilicus_points' not in self.fragment.params or 
+            self.fragment.params['umbilicus_points'] is None or
+            not isinstance(self.fragment.params['umbilicus_points'], dict)):
+            print("Missing umbilicus_points, or wrong format")
+            print("is dict:", isinstance(self.fragment.params['umbilicus_points'], dict))
+            return None
+
+        # Gather umbilicus points within brush radius of z_val
+        candidate_umbilici = []
+        z_min = z_val - brush_radius
+        z_max = z_val + brush_radius
+        for z_umb_val in range(int(z_min), int(z_max) + 1):
+            z_umb_val = str(z_umb_val)
+            
+            if z_umb_val in self.fragment.params['umbilicus_points']:
+                candidate_umbilici.append(self.fragment.params['umbilicus_points'][z_umb_val])
+
+        # If you want a single "average" umbilicus for the entire range, you could do:
+        if candidate_umbilici:
+            average_umbilicus = np.mean(np.array(candidate_umbilici), axis=0)  # shape (3,)
+        else:
+            # Fallback - maybe just pick the umbilicus of z_val or zero vector
+            average_umbilicus = np.array([0.0, 0.0, 0.0]) 
+        print("average_umbilicus_point", average_umbilicus)
+        # --------------------------------------------------------------------------
+        # 2) BFS from each selected node to build candidate 'wrap' sets
+        #    We only consider nodes within the z-range:
+        #       [z_val - brush_radius,  z_val + brush_radius].
+        #    We also define some sort of 'enough coverage' angle threshold
+        #    to decide when we've formed a wrap. E.g. 270 degrees.
+        # --------------------------------------------------------------------------
+        z_min = z_val - brush_radius
+        z_max = z_val + brush_radius
+        angle_threshold = 350.0  # (degrees) a heuristic for 'enough coverage'
+
+        # Helper function to get cylindrical angle around the 'average_umbilicus'
+        def get_angle_around_umbilicus(node_idx):
+            node_xyz = self.fragment.gpoints[node_idx]
+            dx = node_xyz[0] - average_umbilicus[0]
+            dy = node_xyz[1] - average_umbilicus[1]
+            # We can ignore the Z in computing the angle around the axis, or
+            # if you have a custom axis, you'd project onto a plane normal to that axis.
+            angle_deg = np.degrees(np.arctan2(dy, dx)) % 360
+            return angle_deg
+
+        # We'll store all BFS "wrap" groups in this list
+        potential_wraps = []
+
+        print("selected_nodes", len(self.selected_nodes))
+
+        # A global set of nodes that have already been explored 
+        # (and assigned to at least one BFS group).
+        global_covered = set()
+        bfs_count = 0
+        # We do a BFS from each selected node
+        for start_node in self.selected_nodes:
+            # If we've already seen (covered) this node, skip it
+            if start_node in global_covered:
+                continue
+            bfs_count += 1
+            z_of_start = self.fragment.gpoints[start_node][2]
+            if not (z_min <= z_of_start <= z_max):
+                # skip if not in range
+                continue
+
+            visited = set([start_node])
+            group = set([start_node])
+            queue = deque([start_node])
+
+            angles_encountered = [get_angle_around_umbilicus(start_node)]
+
+            while queue:
+                current = queue.popleft()
+                for neighbor in self.adjacency_list[current]:
+                    if neighbor >= len(self.fragment.gpoints):
+                        continue
+                    if neighbor in visited:
+                        continue
+
+                    nz = self.fragment.gpoints[neighbor][2]
+                    if z_min <= nz <= z_max:
+                        visited.add(neighbor)
+                        group.add(neighbor)
+                        queue.append(neighbor)
+
+                        angles_encountered.append(get_angle_around_umbilicus(neighbor))
+
+                    # ---------------------------------------------------------------------
+                    # Check angle coverage
+                    # ---------------------------------------------------------------------
+                    if len(angles_encountered) > 1:
+                        # Sort angles ascending
+                        sorted_angles = np.sort(angles_encountered)
+                        
+                        # Compute differences between consecutive angles
+                        diffs = []
+                        for i in range(len(sorted_angles) - 1):
+                            diffs.append(sorted_angles[i+1] - sorted_angles[i])
+                        
+                        # Also handle wrap-around difference from last angle back to first
+                        wrap_diff = 360.0 - (sorted_angles[-1] - sorted_angles[0])
+                        diffs.append(wrap_diff)
+                        
+                        # Largest gap:
+                        max_gap = max(diffs) if diffs else 0.0
+                        
+                        # Coverage is 360 minus the largest gap
+                        coverage = 360.0 - max_gap
+                        if coverage >= angle_threshold:
+                            # This BFS found a wrap that covers enough of the circle
+                            # print("found a wrap", coverage, max_gap, angle_threshold)
+                            break
+
+            # BFS done for this start_node. Mark all BFS results as covered.
+            global_covered.update(group)
+            potential_wraps.append(group)
+
+        print("bfs_count", bfs_count)   
+        # Now potential_wraps contains BFS groups for each region, 
+        # without repeating BFS for nodes that were already covered.
+
+
+        # --------------------------------------------------------------------------
+        # 3) Pick the group that contains the largest number of selected_nodes
+        # --------------------------------------------------------------------------
+        best_group = None
+        max_selected = 0
+        for group in potential_wraps:
+            selected_count = len(group & self.selected_nodes)
+            if selected_count > max_selected:
+                max_selected = selected_count
+                best_group = group
+
+        if not best_group:
+            print("No wrap group found in 3D that covers any selected nodes.")
+            return None
+
+        # --------------------------------------------------------------------------
+        # 4) Find the largest 'angular gap' among the SELECTED nodes in best_group.
+        #    This is analogous to the 2D approach, but in 3D we still measure angle
+        #    around the chosen 'average_umbilicus' (like a cylindrical projection).
+        # --------------------------------------------------------------------------
+        # We'll collect angles only for the intersection of best_group & selected_nodes
+        selected_in_best = list(best_group & self.selected_nodes)
+        if not selected_in_best:
+            # If there's no intersection, fallback to returning the group
+            self.selected_nodes = best_group
+            return best_group
+
+        angles = []
+        for node in selected_in_best:
+            angles.append(get_angle_around_umbilicus(node))
+        angles = np.array(sorted(angles))
+
+        # Differences between successive angles
+        angle_diffs = np.diff(angles)
+        # Add the wrap-around difference from last back to first (+360)
+        wrap_diff = 360 - (angles[-1] - angles[0])
+        angle_diffs = np.append(angle_diffs, wrap_diff)
+
+        max_gap_idx = np.argmax(angle_diffs)
+        max_gap = angle_diffs[max_gap_idx]
+
+        # If the largest gap is the wrap-around gap (the last index),
+        # we handle that differently:
+        if max_gap_idx == len(angles) - 1:
+            start_angle = angles[-1]
+            end_angle   = angles[0] + 360
+        else:
+            start_angle = angles[max_gap_idx]
+            end_angle   = angles[max_gap_idx + 1]
+            if end_angle < start_angle:
+                end_angle += 360
+
+        target_angle = (start_angle + end_angle) / 2.0
+        target_angle %= 360.0
+
+        # --------------------------------------------------------------------------
+        # 5) Find the node in best_group (not just the selected set) closest to the 
+        #    target_angle. This is effectively our "split" node (seam).
+        # --------------------------------------------------------------------------
+        best_split_node = None
+        min_angle_diff = float('inf')
+        for node in best_group:
+            node_angle = get_angle_around_umbilicus(node)
+            diff = abs((node_angle - target_angle + 180) % 360 - 180)
+            if diff < min_angle_diff:
+                min_angle_diff = diff
+                best_split_node = node
+
+        if best_split_node is None:
+            # Shouldn't happen, but just in case
+            self.selected_nodes = best_group
+            return best_group
+
+        # --------------------------------------------------------------------------
+        # 6) Build final wrap by BFS from the 'opposite angle' side, so that we
+        #    effectively rotate the group. This ensures the seam is at best_split_node.
+        # --------------------------------------------------------------------------
+        opposite_angle = (target_angle + 180) % 360
+
+        # Find the node closest to 'opposite_angle'
+        start_node_2 = None
+        min_angle_diff = float('inf')
+        for node in best_group:
+            node_angle = get_angle_around_umbilicus(node)
+            diff = abs((node_angle - opposite_angle + 180) % 360 - 180)
+            if diff < min_angle_diff:
+                min_angle_diff = diff
+                start_node_2 = node
+
+        if start_node_2 is None:
+            # Fallback, just return the entire best group
+            self.selected_nodes = best_group
+            return best_group
+
+        # Re-BFS to build final wrap, skipping best_split_node to create a seam
+        final_group = set([start_node_2])
+        visited = set([start_node_2])
+        queue = deque([start_node_2])
+
+        while queue:
+            current = queue.popleft()
+            for neighbor in self.adjacency_list[current]:
+                if neighbor in visited:
+                    continue
+                if neighbor == best_split_node:
+                    # skip crossing the seam
+                    continue
+                if neighbor in best_group:
+                    visited.add(neighbor)
+                    final_group.add(neighbor)
+                    queue.append(neighbor)
+
+        # Update self.selected_nodes and return
+        self.selected_nodes = final_group
+        return final_group
+
+
     def findDominantWrap2D(self):
         """
         For each selected node, finds its adjacent nodes at the same z-level.
@@ -2116,6 +2402,8 @@ class TrglFragmentView(BaseFragmentView):
 
         # First find the best group containing most selected nodes
         groups = []
+
+        
         for start_node in self.selected_nodes:
             start_z = round(self.fragment.gpoints[start_node][2], 2)
             

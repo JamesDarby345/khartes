@@ -27,7 +27,7 @@ from PyQt5.QtWidgets import (
         QTableView, QTabWidget, QTextEdit, QToolBar,
         QVBoxLayout, 
         QWidget, QRadioButton, QFormLayout,
-        QScrollArea
+        QScrollArea, QListWidget, QListWidgetItem
         )
 from PyQt5.QtCore import (
         QAbstractTableModel, QCoreApplication, QObject,
@@ -50,7 +50,9 @@ from data_window import DataWindow, SurfaceWindow
 from project import Project, ProjectView
 from fragment import Fragment, FragmentsModel, FragmentView
 from trgl_fragment import TrglFragment, TrglFragmentView
-from umbilicus_fragment import UmbilicusFragment, UmbilicusExporter, UmbilicusImporter
+from umbilicus_fragment import (
+        UmbilicusFragment, UmbilicusExporter, UmbilicusImporter,
+        UmbilicusSelectionDialog)
 from base_fragment import BaseFragment, BaseFragmentView
 from volume import (
         Volume, VolumesModel, 
@@ -888,6 +890,46 @@ class DeleteActiveFragmentButton(QPushButton):
     def onButtonClicked(self):
         self.main_window.deleteActiveFragment()
 
+class AddUmbilicusButton(QPushButton):
+    def __init__(self, main_window, parent=None):
+        super(AddUmbilicusButton, self).__init__("Add Umbilicus", parent)
+        self.main_window = main_window
+        self.setStyleSheet("QPushButton { %s; padding: 5; }"%self.main_window.highlightedBackgroundStyle())
+        self.clicked.connect(self.onButtonClicked)
+        self.setToolTip("Add umbilicus points from an umbilicus fragment to the active 3D fragment")
+        self.setEnabled(False)
+
+    def onButtonClicked(self):
+        pv = self.main_window.project_view
+        if pv is None:
+            print("Warning, cannot add umbilicus without project")
+            return
+            
+        active_fv = pv.mainActiveFragmentView(unaligned_ok=True)
+        if active_fv is None or not hasattr(active_fv.fragment, 'type') or active_fv.fragment.type != Fragment.Type.TRGL_FRAGMENT:
+            print("No active 3D fragment")
+            return
+            
+        # Show dialog to select umbilicus fragment
+        dialog = UmbilicusSelectionDialog(pv, self.main_window)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+            
+        umbilicus_fragment = dialog.getSelectedFragment()
+        if umbilicus_fragment is None:
+            return
+            
+        # Get umbilicus fragment view
+        umbilicus_fv = pv.fragments[umbilicus_fragment]
+        
+        try:
+            # Add points to active fragment
+            num_points = UmbilicusFragment.add_points_to_fragment(umbilicus_fv, active_fv.fragment)
+            QMessageBox.information(self.main_window, "Success", 
+                                  f"Added {num_points} umbilicus points to fragment {active_fv.fragment.name}")
+        except ValueError as e:
+            QMessageBox.warning(self.main_window, "Error", str(e))
+
 class DeleteActiveVolumeButton(QPushButton):
     def __init__(self, main_window, parent=None):
         super(DeleteActiveVolumeButton, self).__init__("Delete Volume", parent)
@@ -1551,6 +1593,8 @@ class MainWindow(QMainWindow):
         hlayout.addWidget(self.copy_frag)
         self.delete_frag = DeleteActiveFragmentButton(self)
         hlayout.addWidget(self.delete_frag)
+        self.add_umbilicus_frag = AddUmbilicusButton(self)
+        hlayout.addWidget(self.add_umbilicus_frag)
 
         '''
         self.move_frag_up = MoveActiveFragmentAlongZButton(self, "Z ↑", -1)
@@ -2145,6 +2189,15 @@ class MainWindow(QMainWindow):
         self.reparam_frag.setEnabled(active)
         self.retriang_frag.setEnabled(active)
         self.delete_frag.setEnabled(active)
+        
+        # Only enable add umbilicus button if active fragment is a 3D fragment
+        if active and pv is not None:
+            active_fv = pv.mainActiveFragmentView(unaligned_ok=True)
+            is_3d = active_fv is not None and hasattr(active_fv.fragment, 'type') and active_fv.fragment.type == Fragment.Type.TRGL_FRAGMENT
+            self.add_umbilicus_frag.setEnabled(is_3d)
+        else:
+            self.add_umbilicus_frag.setEnabled(False)
+
         '''
         self.move_frag_up.setEnabled(active)
         self.move_frag_down.setEnabled(active)
