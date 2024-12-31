@@ -948,6 +948,86 @@ class VolumeView():
     def getSliceBounds(self, axis, ijkt, zarr_max_width):
         return self.volume.getSliceBounds(axis, ijkt, zarr_max_width, self.direction)
 
+    def getDataBoundingBox(self, node_points, padding):
+        """Get a bounding box of data around node points with padding.
+        
+        Args:
+            node_points: Nx3 array of node points in volume coordinates (i,j,k)
+            padding: Amount of padding to add around the bounding box in each direction
+            
+        Returns:
+            Tuple of ((min_i, min_j, min_k), (max_i, max_j, max_k)) representing the bounding box
+            in volume coordinates, or None if invalid
+        """
+        if node_points is None or len(node_points) == 0:
+            return None
+            
+        vol_points = node_points
+            
+        # Calculate min/max with padding for each axis
+        paddings = np.array([padding, padding, padding])
+        min_coords = []
+        max_coords = []
+        
+        for axis in range(3):
+            axis_points = vol_points[:,axis]
+            min_val = np.floor(np.min(axis_points) - paddings[axis]).astype(np.int32)
+            max_val = np.ceil(np.max(axis_points) + paddings[axis]).astype(np.int32)
+            min_coords.append(min_val)
+            max_coords.append(max_val)
+            
+        min_coords = np.array(min_coords)
+        max_coords = np.array(max_coords)
+        print("in getDataBoundingBox")
+        print("min_coords", min_coords)
+        print("max_coords", max_coords)
+
+        # Clip to volume bounds
+        if self.volume.is_zarr:
+            shape = self.trshape
+        else:
+            shape = self.trdata.shape
+            
+        # Convert shape from (k,j,i) to (i,j,k) order to match coordinate system
+        vol_shape = shape[::-1]
+        
+        min_coords = np.clip(min_coords, 0, [s-1 for s in vol_shape])
+        max_coords = np.clip(max_coords, 0, [s-1 for s in vol_shape])
+        
+        return (tuple(min_coords), tuple(max_coords))
+
+    def getDataInBoundingBox(self, bbox):
+        """Get the volume data within a bounding box.
+        
+        Args:
+            bbox: Tuple of ((min_i, min_j, min_k), (max_i, max_j, max_k)) as returned by getDataBoundingBox()
+            
+        Returns:
+            Numpy array containing the volume data within the bounding box
+        """
+        if bbox is None:
+            return None
+            
+        (min_i, min_j, min_k), (max_i, max_j, max_k) = bbox
+        
+        # Convert to transposed coordinates based on direction
+        
+        min_coords = [min_i, min_j, min_k]
+        max_coords = [max_i, max_j, max_k]
+        
+        # Create slices for each dimension
+        slices = tuple(slice(min_coords[i], max_coords[i] + 1) for i in range(3))
+        
+        # Get the data
+        if self.volume.is_zarr:
+            # For zarr volumes, use the loader
+            data = self.volume.levels[0].data[slices]
+        else:
+            # For regular volumes, slice directly
+            data = self.trdata[slices]
+            
+        return data
+
 class TransposedDataView():
     def __init__(self, data, direction=0):
         self.direction = direction

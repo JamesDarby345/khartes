@@ -1890,14 +1890,42 @@ class TrglFragmentView(BaseFragmentView):
             # print("ts", len(trgl_stack))
         return out_trgls
     
-    def moveSelectedNodesToBrushArc(self, brush_points, z_depth, z_val):
+    #TODO: ensure this works for larger swathes/gets all the relevant data
+    def stickyNodeSelection(self, selected_points_xyz, bbox_padding=1):
         """
-        Moves selected nodes to positions interpolated from brush points, with Gaussian falloff based on z-distance.
+        Get volumetric data around selected nodes to guide movement
+        Returns: (filtered_coords, filtered_indices) tuple where filtered_indices 
+        contains the indices of points that passed the filter
+        """
+        vv = self.cur_volume_view
+        vol_coords_zyx = selected_points_xyz[:, [2,1,0]] # Transform to vol_coords
+        node_data_bbox = vv.getDataBoundingBox(vol_coords_zyx, bbox_padding)
+        volume_data = vv.getDataInBoundingBox(node_data_bbox)
         
-        Args:
-            brush_points (np.ndarray): Array of (x,y) brush stroke points
-            z_depth (float): Maximum z-distance for influence
-            z_val (int): Target Z-level index
+        # Convert to local coordinates
+        local_coords = vol_coords_zyx - node_data_bbox[0]
+
+        # Check each position in volume data
+        filtered_coords = []
+        filtered_indices = []
+        for i, coord in enumerate(local_coords):
+            pos = coord.astype(int)
+            # print("pos", pos)
+            if volume_data[pos[0], pos[1], pos[2]] <= 0:
+                filtered_coords.append(coord)
+                filtered_indices.append(i)  # Track indices that pass filter
+                
+        # Convert back to global coordinates
+        if filtered_coords:
+            filtered_coords = np.array(filtered_coords) + node_data_bbox[0]
+            filtered_coords = filtered_coords[:, [2,1,0]] # Transform back to x,y,z
+            return filtered_coords, filtered_indices
+            
+        return selected_points_xyz, list(range(len(selected_points_xyz)))
+
+    def moveSelectedNodesToBrushArc(self, brush_points, z_depth, z_val, sticky_move=False):
+        """
+        Moves selected nodes to positions interpolated from brush points
         """
         if not hasattr(self.fragment, 'params') or self.fragment.params is None:
             print("Missing params")
@@ -1931,6 +1959,23 @@ class TrglFragmentView(BaseFragmentView):
         # Convert selected nodes to polar coordinates
         selected_indices = np.array(list(self.selected_nodes))
         selected_points = self.fragment.gpoints[selected_indices]
+        print("selected_points", selected_points[0])
+        
+        # Use sticky_move from draw_settings if not explicitly provided
+        if sticky_move is None:
+            sticky_move = self.window.draw_settings.get('sticky_move_enabled', False)
+            
+        if sticky_move:
+            selected_points, valid_indices = self.stickyNodeSelection(selected_points, bbox_padding=1)
+            # Update selected indices to only include points that passed the filter
+            selected_indices = selected_indices[valid_indices]
+            # Update selected_nodes set
+            self.selected_nodes = set(selected_indices)
+            
+            if len(selected_indices) == 0:
+                print("No points remain after sticky filtering")
+                return
+        
         vectors = selected_points[:, :2] - umbilicus_xy
         node_angles = np.degrees(np.arctan2(vectors[:, 1], vectors[:, 0])) % 360
         node_radii = np.sqrt(np.sum(vectors**2, axis=1))
@@ -1961,13 +2006,14 @@ class TrglFragmentView(BaseFragmentView):
         new_x = umbilicus_xy[0] + final_radii * np.cos(angles_rad)
         new_y = umbilicus_xy[1] + final_radii * np.sin(angles_rad)
         
+        # x,z,y
         # Create array of new positions, maintaining Z coordinates
         new_positions = np.column_stack((
             new_x,
             selected_points[:, 2],  # Keep original Z coordinates
             new_y
         ))
-        
+
         # Move all points at once
         self.movePoints(selected_indices, new_positions, True, True)
         

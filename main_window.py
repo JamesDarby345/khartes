@@ -1121,6 +1121,7 @@ class MainWindow(QMainWindow):
             "apply_opacity": True,
         },
         "paint_mode_enabled": False,
+        "sticky_move_enabled": False,
         "brush_control": {
             "angle_threshold": 5.0,  # degrees
             "falloff_type": "cosine", # "cosine" or "quadratic"
@@ -1404,6 +1405,9 @@ class MainWindow(QMainWindow):
 
         self.paint_mode_button = PaintModeButton(self)
         self.toolbar.addWidget(self.paint_mode_button)
+
+        self.sticky_move_button = StickyMoveButton(self)
+        self.toolbar.addWidget(self.sticky_move_button)
 
         self.toggle_direction_action = QAction("Toggle direction", self)
         self.toggle_direction_action.triggered.connect(self.onToggleDirectionButtonClick)
@@ -1717,6 +1721,10 @@ class MainWindow(QMainWindow):
                 fv.setLiveZsurfUpdate(lzu)
             self.app.restoreOverrideCursor()
             self.drawSlices()
+
+    def toggleStickyMove(self):
+        self.draw_settings['sticky_move_enabled'] = not self.draw_settings['sticky_move_enabled']
+        self.settingsSaveDrawSettings()
 
     def togglePaintMode(self):
         # Get current state from paint mode button
@@ -4067,6 +4075,33 @@ class MoveNodeButton(QPushButton):
         self.main_window.draw_settings['move_node_enabled'] = flag
         self.main_window.settingsSaveDrawSettings()  # Save to QSettings
         if flag:
+            self.setStyleSheet("QPushButton { background-color: blue ; padding: 5 }")
+        else:
+            self.setStyleSheet("QPushButton {padding: 5}")
+
+class StickyMoveButton(QPushButton):
+    def __init__(self, main_window, parent=None):
+        super(StickyMoveButton, self).__init__("", parent)
+        self.main_window = main_window
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        self.setStyleSheet("QPushButton {padding: 5}")
+        self.checked = False
+        self.setText("SM")
+        self.clicked.connect(self.onButtonClicked)
+        self.setToolTip("Toggle sticky move mode for brush arc movement")
+        
+        # Initialize from draw_settings
+        self.setChecked(self.main_window.draw_settings.get('sticky_move_enabled', False))
+        
+    def onButtonClicked(self, s):
+        self.setChecked(not self.checked)
+
+    def setChecked(self, flag):
+        self.checked = flag
+        # Update draw_settings
+        self.main_window.draw_settings['sticky_move_enabled'] = self.checked
+        self.main_window.settingsSaveDrawSettings()  # Save to QSettings
+        if self.checked:
             self.setStyleSheet("QPushButton { background-color: blue ; padding: 5 }")
         else:
             self.setStyleSheet("QPushButton {padding: 5}")
