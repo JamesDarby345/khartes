@@ -735,7 +735,6 @@ class ZarrMaxWindowWidthEditor(QWidget):
         else:
             self.edit.setStyleSheet("QLineEdit { color: red }")
 
-
 class ZarrMaxCacheGb(QWidget):
     def __init__(self, main_window, parent=None):
         super(ZarrMaxCacheGb, self).__init__(parent)
@@ -1162,7 +1161,7 @@ class MainWindow(QMainWindow):
             "enabled": True,
             "interval": 60  # seconds
         },
-        "move_node_enabled": False,  # Default to disabled
+        "move_node_enabled": False,
     }
 
     # zarr_signal = Signal(str)
@@ -4064,10 +4063,6 @@ class MoveNodeButton(QPushButton):
 
     def setChecked(self, flag):
         self.checked = flag
-        # Update data windows
-        self.main_window.depth.allow_mouse_drag = flag
-        self.main_window.inline.allow_mouse_drag = flag
-        self.main_window.xline.allow_mouse_drag = flag
         # Update draw_settings
         self.main_window.draw_settings['move_node_enabled'] = flag
         self.main_window.settingsSaveDrawSettings()  # Save to QSettings

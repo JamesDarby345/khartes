@@ -95,7 +95,6 @@ class DataWindow(QLabel):
         self.paint_mode = False
         self.stroke_points = []
         self.is_painting = False
-        self.allow_mouse_drag = False
 
         self.paint_cursor_radius = 5  # Add default radius
         self.createPaintCursor()  # Move cursor creation to separate method
@@ -698,7 +697,7 @@ class DataWindow(QLabel):
         return self.volume_view.zoom * self.zoomMult
 
     def allowMouseToDragNode(self):
-        return self.allow_mouse_drag
+        return self.window.draw_settings.get('move_node_enabled', False)
 
     def computeTfStartPoint(self):
         return self.volume_view.ijktf
