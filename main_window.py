@@ -1058,6 +1058,17 @@ class BrushControlPanel(QGroupBox):
         self.min_effect.valueChanged.connect(self.onMinEffectChanged)
         layout.addRow("Min Effect:", self.min_effect)
         
+        # Add wrap range multiplier spinner to brush control settings
+        self.wrap_range_mult = QDoubleSpinBox()
+        self.wrap_range_mult.setRange(0.1, 1000.0)
+        self.wrap_range_mult.setSingleStep(0.1)
+        self.wrap_range_mult.setDecimals(1)
+        self.wrap_range_mult.setValue(main_window.draw_settings["brush_control"]["wrap_range_mult"])
+        self.wrap_range_mult.valueChanged.connect(
+            lambda v: self.main_window.setDrawSettingsValue("brush_control", "wrap_range_mult", v)
+        )
+        layout.addRow("Wrap Range Mult:", self.wrap_range_mult)
+        
         self.setLayout(layout)
     
     def onAngleThresholdChanged(self, value):
@@ -1078,6 +1089,7 @@ class BrushControlPanel(QGroupBox):
         self.falloff_type.setCurrentText(settings["falloff_type"].capitalize())
         self.search_radius.setValue(settings["search_radius"])
         self.min_effect.setValue(settings["min_effect"])
+        self.wrap_range_mult.setValue(settings["wrap_range_mult"])
 
 class MainWindow(QMainWindow):
 
@@ -1115,6 +1127,7 @@ class MainWindow(QMainWindow):
             "falloff_type": "cosine", # "cosine" or "quadratic"
             "search_radius": 50.0,  # pixels
             "min_effect": 0.1,  # minimum effect strength (0-1)
+            "wrap_range_mult": 1.0,  # multiplier for wrap range in findDominantWrap3D
         },
         "borders": {
             "width": 1,
@@ -1968,64 +1981,8 @@ class MainWindow(QMainWindow):
         hlayout.addStretch()
         
         # Add brush control settings
-        brush_vbox = QVBoxLayout()
-        hlayout.addLayout(brush_vbox)
-        brush_frame = QGroupBox("Brush Control")
-        brush_vbox.addWidget(brush_frame)
-        brush_vbox.addStretch()
-        brush_layout = QFormLayout()
-        brush_frame.setLayout(brush_layout)
-        
-        # Angle threshold spinner
-        angle_threshold = QDoubleSpinBox()
-        angle_threshold.setRange(0.1, 90.0)
-        angle_threshold.setSingleStep(0.5)
-        angle_threshold.setDecimals(1)
-        angle_threshold.setValue(self.draw_settings["brush_control"]["angle_threshold"])
-        angle_threshold.valueChanged.connect(
-            lambda v: self.setDrawSettingsValue("brush_control", "angle_threshold", v)
-        )
-        brush_layout.addRow("Angle Threshold (°):", angle_threshold)
-        
-        # Falloff type combo
-        falloff_type = QComboBox()
-        falloff_type.addItems(["Cosine", "Quadratic"])
-        current_falloff = self.draw_settings["brush_control"]["falloff_type"]
-        falloff_type.setCurrentText(current_falloff.capitalize())
-        falloff_type.currentTextChanged.connect(
-            lambda t: self.setDrawSettingsValue("brush_control", "falloff_type", t.lower())
-        )
-        brush_layout.addRow("Falloff Type:", falloff_type)
-        
-        # Search radius spinner
-        search_radius = QDoubleSpinBox()
-        search_radius.setRange(1.0, 10000.0)
-        search_radius.setSingleStep(1.0)
-        search_radius.setDecimals(1)
-        search_radius.setValue(self.draw_settings["brush_control"]["search_radius"])
-        search_radius.valueChanged.connect(
-            lambda v: self.setDrawSettingsValue("brush_control", "search_radius", v)
-        )
-        brush_layout.addRow("Search Radius:", search_radius)
-        
-        # Minimum effect spinner
-        min_effect = QDoubleSpinBox()
-        min_effect.setRange(0.0, 10.0)
-        min_effect.setSingleStep(0.05)
-        min_effect.setDecimals(2)
-        min_effect.setValue(self.draw_settings["brush_control"]["min_effect"])
-        min_effect.valueChanged.connect(
-            lambda v: self.setDrawSettingsValue("brush_control", "min_effect", v)
-        )
-        brush_layout.addRow("Min Effect:", min_effect)
-        
-        # Store widgets for updating from settings
-        self.draw_settings_widgets["brush_control"] = {
-            "angle_threshold": angle_threshold,
-            "falloff_type": falloff_type,
-            "search_radius": search_radius,
-            "min_effect": min_effect
-        }
+        brush_panel = BrushControlPanel(self)
+        hlayout.addWidget(brush_panel)
 
         # Add autosave settings
         hbox = QHBoxLayout()

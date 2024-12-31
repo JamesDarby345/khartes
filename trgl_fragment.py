@@ -1890,22 +1890,23 @@ class TrglFragmentView(BaseFragmentView):
             # print("ts", len(trgl_stack))
         return out_trgls
     
-    def moveSelectedNodesToBrushArc(self, brush_points, brush_radius, z_val):
+    def moveSelectedNodesToBrushArc(self, brush_points, z_depth, z_val):
         """
-        Moves selected nodes to positions interpolated from brush points, maintaining their angles
-        but adjusting their radii to match the interpolated brush arc.
+        Moves selected nodes to positions interpolated from brush points, with Gaussian falloff based on z-distance.
         
         Args:
             brush_points (np.ndarray): Array of (x,y) brush stroke points
-            brush_radius (float): Radius around brush stroke to consider
-            z_val (int): Z-level index
+            z_depth (float): Maximum z-distance for influence
+            z_val (int): Target Z-level index
         """
         if not hasattr(self.fragment, 'params') or self.fragment.params is None:
             print("Missing params")
             return None
             
-        if 'umbilicus_points' not in self.fragment.params or self.fragment.params['umbilicus_points'] is None:
-            print("Missing umbilicus_points")
+        if ('umbilicus_points' not in self.fragment.params or 
+            self.fragment.params['umbilicus_points'] is None or
+            not isinstance(self.fragment.params['umbilicus_points'], dict)):
+            print("Missing umbilicus_points, or wrong format")
             return None
             
         if not hasattr(self, 'selected_nodes') or not self.selected_nodes:
@@ -1913,7 +1914,7 @@ class TrglFragmentView(BaseFragmentView):
             return None
 
         # Get umbilicus point for this z-level
-        umbilicus_point_3d = self.fragment.params['umbilicus_points'][z_val]
+        umbilicus_point_3d = self.fragment.params['umbilicus_points'][str(z_val)]
         umbilicus_xy = umbilicus_point_3d[:2]
 
         # Convert brush points to polar coordinates
@@ -1929,47 +1930,47 @@ class TrglFragmentView(BaseFragmentView):
 
         # Convert selected nodes to polar coordinates
         selected_indices = np.array(list(self.selected_nodes))
-        selected_points = self.fragment.gpoints[selected_indices][:, :2]
-        vectors = selected_points - umbilicus_xy
+        selected_points = self.fragment.gpoints[selected_indices]
+        vectors = selected_points[:, :2] - umbilicus_xy
         node_angles = np.degrees(np.arctan2(vectors[:, 1], vectors[:, 0])) % 360
         node_radii = np.sqrt(np.sum(vectors**2, axis=1))
+        node_z = selected_points[:, 2]
+
+        # Calculate Gaussian weights based on z-distance
+        sigma = z_depth / 3.0  # 3 sigma covers 99.7% of the distribution
+        z_distances = np.abs(node_z - z_val)
+        gaussian_weights = np.exp(-(z_distances**2) / (2 * sigma**2))
+        # Clip very small weights to 0 to avoid tiny movements
+        gaussian_weights[gaussian_weights < 0.01] = 0
 
         # Handle wrap-around for interpolation
-        # If the brush stroke crosses the 0/360 boundary, adjust angles
         if brush_angles[-1] - brush_angles[0] > 180:
-            # Some points need to be adjusted by +360 for proper interpolation
             brush_angles = np.where(brush_angles < brush_angles[0], brush_angles + 360, brush_angles)
             node_angles = np.where(node_angles < brush_angles[0], node_angles + 360, node_angles)
 
         # Interpolate radii for each node based on its angle
         new_radii = np.interp(node_angles, brush_angles, brush_radii)
 
+        # Apply Gaussian weights to the radial displacement
+        radial_displacement = new_radii - node_radii
+        weighted_displacement = radial_displacement * gaussian_weights
+        final_radii = node_radii + weighted_displacement
+
         # Convert back to cartesian coordinates
         angles_rad = np.radians(node_angles)
-        new_x = umbilicus_xy[0] + new_radii * np.cos(angles_rad)
-        new_y = umbilicus_xy[1] + new_radii * np.sin(angles_rad)
+        new_x = umbilicus_xy[0] + final_radii * np.cos(angles_rad)
+        new_y = umbilicus_xy[1] + final_radii * np.sin(angles_rad)
         
         # Create array of new positions, maintaining Z coordinates
-        #move points assumes x,z,y
         new_positions = np.column_stack((
-            new_x, 
-            self.fragment.gpoints[selected_indices][:, 2],
+            new_x,
+            selected_points[:, 2],  # Keep original Z coordinates
             new_y
         ))
-
-        # print("new_positions", new_positions.shape, new_positions[0])
         
         # Move all points at once
         self.movePoints(selected_indices, new_positions, True, True)
-
-        # print(f"Moved {len(self.selected_nodes)} nodes to interpolated positions")
         
-        
-        
-
-
-
-
 
     def findNodesInBrushArc(self, brush_points, brush_radius, z_val):
         """
@@ -1989,8 +1990,10 @@ class TrglFragmentView(BaseFragmentView):
             print("Missing params")
             return None
             
-        if 'umbilicus_points' not in self.fragment.params or self.fragment.params['umbilicus_points'] is None:
-            print("Missing umbilicus_points")
+        if ('umbilicus_points' not in self.fragment.params or 
+            self.fragment.params['umbilicus_points'] is None or
+            not isinstance(self.fragment.params['umbilicus_points'], dict)):
+            print("Missing umbilicus_points, or wrong format")
             return None
             
         if not hasattr(self, 'selected_nodes') or not self.selected_nodes:
@@ -2002,7 +2005,10 @@ class TrglFragmentView(BaseFragmentView):
             return None
 
         # Get umbilicus point for this z-level
-        umbilicus_point_3d = self.fragment.params['umbilicus_points'][z_val]
+        if str(z_val) not in self.fragment.params['umbilicus_points']:
+            print("No umbilicus point for z_val", z_val)
+            return None
+        umbilicus_point_3d = self.fragment.params['umbilicus_points'][str(z_val)]
         umbilicus_xy = umbilicus_point_3d[:2]
 
         # Convert brush points to numpy array if not already
@@ -2082,29 +2088,7 @@ class TrglFragmentView(BaseFragmentView):
 
         return nodes_in_arc
 
-
-    # def findDominantWrap3D(self, brush_radius, z_val):
-    #     # Initial validation checks remain the same
-    #     if not hasattr(self.fragment, 'params') or self.fragment.params is None:
-    #         print("Missing params")
-    #         return None
-        
-    #     if not hasattr(self, 'selected_nodes') or not self.selected_nodes:
-    #         print("no selected_nodes")
-    #         return None
-
-    #     if not hasattr(self, 'adjacency_list') or self.adjacency_list is None:
-    #         print("no adjacency_list")
-    #         return None
-        
-    #     if 'umbilicus_points' not in self.fragment.params or self.fragment.params['umbilicus_points'] is None:
-    #         print("Missing umbilicus_points")
-    #         return None
-        
-    #     umbilicus_points_3d = self.fragment.params['umbilicus_points'][z_val-brush_radius:z_val+brush_radius]
-
-
-    def findDominantWrap3D(self, brush_radius, z_val):
+    def findDominantWrap3D(self, brush_radius, z_val, range_mult=1):
         """
         A generalized 3D version of the 'findDominantWrap2D'. 
         Tries to find a 'dominant wrap' among the nodes selected by a 3D brushstroke.
@@ -2135,25 +2119,10 @@ class TrglFragmentView(BaseFragmentView):
             self.fragment.params['umbilicus_points'] is None or
             not isinstance(self.fragment.params['umbilicus_points'], dict)):
             print("Missing umbilicus_points, or wrong format")
-            print("is dict:", isinstance(self.fragment.params['umbilicus_points'], dict))
             return None
+        
 
-        # Gather umbilicus points within brush radius of z_val
-        candidate_umbilici = []
-        z_min = z_val - brush_radius
-        z_max = z_val + brush_radius
-        for z_umb_val in range(int(z_min), int(z_max) + 1):
-            z_umb_val = str(z_umb_val)
-            
-            if z_umb_val in self.fragment.params['umbilicus_points']:
-                candidate_umbilici.append(self.fragment.params['umbilicus_points'][z_umb_val])
-
-        # If you want a single "average" umbilicus for the entire range, you could do:
-        if candidate_umbilici:
-            average_umbilicus = np.mean(np.array(candidate_umbilici), axis=0)  # shape (3,)
-        else:
-            # Fallback - maybe just pick the umbilicus of z_val or zero vector
-            average_umbilicus = np.array([0.0, 0.0, 0.0]) 
+        average_umbilicus = self.fragment.params['umbilicus_points'][str(z_val)]
         print("average_umbilicus_point", average_umbilicus)
         # --------------------------------------------------------------------------
         # 2) BFS from each selected node to build candidate 'wrap' sets
@@ -2162,8 +2131,8 @@ class TrglFragmentView(BaseFragmentView):
         #    We also define some sort of 'enough coverage' angle threshold
         #    to decide when we've formed a wrap. E.g. 270 degrees.
         # --------------------------------------------------------------------------
-        z_min = z_val - brush_radius
-        z_max = z_val + brush_radius
+        z_min = z_val - (brush_radius * range_mult)
+        z_max = z_val + (brush_radius * range_mult)
         angle_threshold = 350.0  # (degrees) a heuristic for 'enough coverage'
 
         # Helper function to get cylindrical angle around the 'average_umbilicus'

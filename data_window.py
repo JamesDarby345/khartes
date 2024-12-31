@@ -106,7 +106,14 @@ class DataWindow(QLabel):
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
         painter.setPen(QPen(Qt.black))
+        
+        # Draw outer circle
         painter.drawEllipse(1, 1, size-2, size-2)  # Draw circle with 1px border
+        
+        # Draw center dot (3x3 pixels)
+        center = size // 2
+        painter.fillRect(center-1, center-1, 3, 3, Qt.black)
+        
         painter.end()
         self.paintCursor = QCursor(pixmap, self.paint_cursor_radius, self.paint_cursor_radius)
 
@@ -2638,17 +2645,26 @@ into and out of the viewing plane.
         
         # arc logic only relevant for z-axis on trgl_fragments
         if current_frag.fragment.type == BaseFragment.Type.TRGL_FRAGMENT and self.axis == 1:
+            # Get wrap range multiplier from settings
+            # Check if settings exist, default to 1 if not
+            wrap_range_mult = 1
+            if hasattr(self.window, 'draw_settings'):
+                if 'brush_control' in self.window.draw_settings:
+                    if 'wrap_range_mult' in self.window.draw_settings['brush_control']:
+                        wrap_range_mult = self.window.draw_settings['brush_control']['wrap_range_mult']
+            
             # Find dominant wrap in selection
-            success = current_frag.findDominantWrap3D(scaled_radius, self.positionOnAxis())
+            success = current_frag.findDominantWrap3D(scaled_radius, self.positionOnAxis(), wrap_range_mult)
             if not success:
                 print("failed to find a dominant wrap")
                 return
             # Find nodes within the brush arc
-            # arc_nodes = current_frag.findNodesInBrushArc(sampled_points, self.paint_cursor_radius, self.positionOnAxis())
-            # if arc_nodes:
-            #     # Update selected nodes to only those within the arc
-            #     current_frag.selected_nodes = arc_nodes
-            #     current_frag.moveSelectedNodesToBrushArc(sampled_points, self.paint_cursor_radius, self.positionOnAxis())
+            arc_nodes = current_frag.findNodesInBrushArc(sampled_points, self.paint_cursor_radius, self.positionOnAxis())
+            if arc_nodes:
+                # Update selected nodes to only those within the arc
+                current_frag.selected_nodes = arc_nodes
+                current_frag.moveSelectedNodesToBrushArc(sampled_points, (scaled_radius*wrap_range_mult), self.positionOnAxis())
+                self.drawSlice()
 
     def point_to_line_distance(self, p, a, b):
         """Calculate distance from point p to line segment ab"""

@@ -103,13 +103,27 @@ class UmbilicusFragment(Fragment):
             
         # Create dictionary mapping z-values to points
         points_dict = {}
+        
+        # Add manual points
         for point in umbilicus_fragment_view.manual_points:
             z_val = int(round(point[2]))  # Round z-value to nearest integer
             points_dict[z_val] = point.tolist() # Convert numpy array to list
             
+        # Add interpolated points if they exist
+        if hasattr(umbilicus_fragment_view, 'interpolated_points') and umbilicus_fragment_view.interpolated_points is not None:
+            for point in umbilicus_fragment_view.interpolated_points:
+                z_val = int(round(point[2]))
+                if z_val not in points_dict:  # Don't overwrite manual points
+                    points_dict[z_val] = point.tolist()
+            
         # Store points in fragment params
         target_fragment.params['umbilicus_points'] = points_dict
         target_fragment.notifyModified()
+        
+        # Force refresh of fragment view caches and local points
+        target_fragment_view = umbilicus_fragment_view.project_view.fragments[target_fragment]
+        target_fragment_view.clearCaches()
+        target_fragment_view.setLocalPoints(True, True, True, True)
         
         return len(points_dict)
 
