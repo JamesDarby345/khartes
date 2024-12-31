@@ -1161,7 +1161,8 @@ class MainWindow(QMainWindow):
         "autosave": {
             "enabled": True,
             "interval": 60  # seconds
-        }
+        },
+        "move_node_enabled": False,  # Default to disabled
     }
 
     # zarr_signal = Signal(str)
@@ -1398,6 +1399,9 @@ class MainWindow(QMainWindow):
 
         self.retriangulate_button = RetriangulateButton(self)
         self.toolbar.addWidget(self.retriangulate_button)
+        
+        self.move_node_button = MoveNodeButton(self)
+        self.toolbar.addWidget(self.move_node_button)
 
         self.paint_mode_button = PaintModeButton(self)
         self.toolbar.addWidget(self.paint_mode_button)
@@ -4041,3 +4045,33 @@ class AutosaveIntervalSpinBox(QSpinBox):
         
     def updateValue(self, value):
         self.setValue(value)
+
+class MoveNodeButton(QPushButton):
+    def __init__(self, main_window, parent=None):
+        super(MoveNodeButton, self).__init__("MP", parent)
+        self.main_window = main_window
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        self.setStyleSheet("QPushButton {padding: 5}")
+        self.checked = False
+        self.clicked.connect(self.onButtonClicked)
+        self.setToolTip("Toggle mouse drag mode for moving nodes")
+        
+        # Initialize from draw_settings
+        self.setChecked(self.main_window.draw_settings.get('move_node_enabled', False))
+        
+    def onButtonClicked(self, s):
+        self.setChecked(not self.checked)
+
+    def setChecked(self, flag):
+        self.checked = flag
+        # Update data windows
+        self.main_window.depth.allow_mouse_drag = flag
+        self.main_window.inline.allow_mouse_drag = flag
+        self.main_window.xline.allow_mouse_drag = flag
+        # Update draw_settings
+        self.main_window.draw_settings['move_node_enabled'] = flag
+        self.main_window.settingsSaveDrawSettings()  # Save to QSettings
+        if flag:
+            self.setStyleSheet("QPushButton { background-color: blue ; padding: 5 }")
+        else:
+            self.setStyleSheet("QPushButton {padding: 5}")
