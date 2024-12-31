@@ -514,6 +514,7 @@ class BaseFragmentView:
         # Build adjacency list from triangles
         trgls = self.trgls()
         if build_adjacency_list:
+            print("building adjacency list")
             if trgls is not None and len(trgls) > 0:
                 # print("building adjacency list")
                 stime = time.time()
@@ -545,11 +546,11 @@ class BaseFragmentView:
                 self.kd_tree = KDTree(self.fragment.gpoints)
                 # print("kd tree built in", time.time() - stime)
 
-            if build_spatial_hash_grid:
-                # print("building spatial hash grid")
-                stime = time.time()
-                self.spatial_hash_grid = SpatialHashGrid(self.fragment.gpoints, thickness=10)
-                # print("spatial hash grid built in", time.time() - stime)
+            # if build_spatial_hash_grid:
+            #     # print("building spatial hash grid")
+            #     stime = time.time()
+            #     self.spatial_hash_grid = SpatialHashGrid(self.fragment.gpoints, thickness=10)
+            #     # print("spatial hash grid built in", time.time() - stime)
 
     def updateSelectedNodes(self, point_index, k=None, radius=None, use_3d=False):
         """

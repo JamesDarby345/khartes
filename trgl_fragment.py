@@ -6,6 +6,8 @@ from pathlib import Path
 from collections import deque
 import traceback
 from scipy.spatial import Delaunay
+from scipy.ndimage import distance_transform_edt
+
 import scipy
 import cv2
 import multiprocessing as mp
@@ -1017,7 +1019,6 @@ class TrglFragmentView(BaseFragmentView):
     def stxysToUvs(self, stxys):
         stxys = stxys.copy() - self.st_shift
         a,b,c,d = self.st_abcd
-        # print("stu", a,b,c,d)
         det = a*d-b*c
         uvs = np.zeros((stxys.shape[0], 2), dtype=np.float64)
         uvs[:,0] = (d*stxys[:,0] - b*stxys[:,1])/det
@@ -1096,10 +1097,6 @@ class TrglFragmentView(BaseFragmentView):
         lworking = len(vs)
         lnonworking = len(self.vpoints)-lworking
         self.has_working_non_working = (lworking>0, lnonworking>0)
-        # print("lwlnw wnw", lworking, lnonworking, self.has_working_non_working)
-        # self.working_vpoints = self.vpoints[vs]
-        # print("wvp", len(self.working_vpoints))
-        # print("trgl_fragment set local points")
 
         self.working_fragment = Fragment("working", self.fragment.direction)
         self.working_fragment.setColor(self.fragment.color)
@@ -1155,18 +1152,6 @@ class TrglFragmentView(BaseFragmentView):
     # NOTE that input axis and position are in local tijk coordinates,
     # and that output vertices are in tijk coordinates
     def getLinesOnSlice(self, axis, axis_pos):
-        '''
-        tijk = [0,0,0]
-        tijk[axis] = axis_pos
-        gijk = self.cur_volume_view.transposedIjkToGlobalPosition(tijk)
-        gaxis = self.cur_volume_view.globalAxisFromTransposedAxis(axis)
-        gpos = gijk[gaxis]
-        ints = self.fragment.findIntersections(gaxis, gpos)
-        gpts = ints.reshape(-1, 3)
-        vpts = self.cur_volume_view.globalPositionsToTransposedIjks(gpts)
-        plines = vpts.reshape(-1,2,3)
-        return plines
-        '''
         ints, trglist = TrglFragment.findIntersections(self.fpoints, self.trgls(), axis, axis_pos)
         plines = ints.reshape(-1,2,3)
         return plines, trglist
@@ -1644,6 +1629,7 @@ class TrglFragmentView(BaseFragmentView):
 
         if tcount > 0 and constrained and nps2match:
             self.addLocalPoint(nstp)
+            # self.buildKDTrees(recursion_ok=True)
         else:
             if not nps2match:
                 print("addPoint: set local points", tcount, constrained, nps2match)
@@ -1837,7 +1823,8 @@ class TrglFragmentView(BaseFragmentView):
             if not nps2match:
                 print("deletePointByIndex: set local points", constrained, nps2match)
             self.setLocalPoints(True, False, build_kd_trees=True, build_adjacency_list=True)
-
+        # else:
+        #     self.buildKDTrees(recursion_ok=True)
         # Clear selected nodes after deletion
         if hasattr(self, 'selected_nodes'):
             self.selected_nodes = set()
@@ -1889,6 +1876,115 @@ class TrglFragmentView(BaseFragmentView):
                 trgl_stack.append(neigh)
             # print("ts", len(trgl_stack))
         return out_trgls
+    
+    def find_closest_voxels(self,local_coords, volume_data, max_radius=5):
+        """
+        Find the closest non-zero voxel within max_radius for each coordinate in local_coords.
+        
+        Args:
+            local_coords: numpy array of shape (N, 3) containing Z,Y,X coordinates
+            volume_data: 3D numpy array containing binary volume data (0 or 255)
+            max_radius: maximum search radius in voxels
+        
+        Returns:
+            new_positions: numpy array of shape (N, 3) containing new Z,Y,X coordinates
+            distances: numpy array of shape (N,) containing distances to closest voxels
+            success_mask: boolean array indicating which points had a valid closest voxel
+        """
+        # Convert volume data to binary
+        binary_volume = (volume_data > 0).astype(np.float32)
+        
+        # Calculate distance transform from non-zero voxels
+        # dist_transform = distance_transform_edt(~binary_volume)
+        
+        # Initialize outputs
+        coords = local_coords.astype(np.int32)
+        n_points = len(coords)
+        new_positions = coords.copy()
+        distances = np.full(n_points, np.inf)
+        success_mask = np.zeros(n_points, dtype=bool)
+        
+        # Get volume dimensions
+        z_max, y_max, x_max = volume_data.shape
+        
+        # Create search window
+        r = max_radius
+        z, y, x = np.mgrid[-r:r+1, -r:r+1, -r:r+1]
+        sphere_mask = (z*z + y*y + x*x) <= r*r
+        offsets = np.column_stack((z[sphere_mask], y[sphere_mask], x[sphere_mask]))
+        
+        for i, coord in enumerate(coords):
+            z, y, x = coord
+            
+            # Check if coordinate is within volume bounds
+            if not (0 <= z < z_max and 0 <= y < y_max and 0 <= x < x_max):
+                continue
+                
+            # Generate neighborhood coordinates
+            neighbors = coord + offsets
+            
+            # Filter out of bounds neighbors
+            valid_mask = (
+                (neighbors[:, 0] >= 0) & (neighbors[:, 0] < z_max) &
+                (neighbors[:, 1] >= 0) & (neighbors[:, 1] < y_max) &
+                (neighbors[:, 2] >= 0) & (neighbors[:, 2] < x_max)
+            )
+            valid_neighbors = neighbors[valid_mask]
+            
+            if len(valid_neighbors) == 0:
+                continue
+                
+            # Get values and distances for valid neighbors
+            neighbor_values = binary_volume[valid_neighbors[:, 0], 
+                                        valid_neighbors[:, 1], 
+                                        valid_neighbors[:, 2]]
+            
+            non_zero_mask = neighbor_values > 0
+            if not np.any(non_zero_mask):
+                continue
+                
+            # Calculate distances to non-zero neighbors
+            non_zero_neighbors = valid_neighbors[non_zero_mask]
+            squared_distances = np.sum((non_zero_neighbors - coord) ** 2, axis=1)
+            min_dist_idx = np.argmin(squared_distances)
+            min_distance = np.sqrt(squared_distances[min_dist_idx])
+            
+            if min_distance <= max_radius:
+                new_positions[i] = non_zero_neighbors[min_dist_idx]
+                distances[i] = min_distance
+                success_mask[i] = True
+        
+        return new_positions, distances, success_mask
+
+    def moveNodesToData(self, max_radius=5):
+        """
+        Modified version of moveNodesToData that finds closest non-zero voxels.
+        """
+        if not hasattr(self, 'selected_nodes') or not self.selected_nodes:
+            print("No selected_nodes")
+            return
+        print("moveNodesToData")
+        # Convert set of indices to array and get their coordinates
+        selected_indices = np.array(list(self.selected_nodes))
+        selected_points_xyz = self.fragment.gpoints[selected_indices]
+        print("selected_points_xyz", selected_points_xyz[0])
+        vv = self.cur_volume_view
+        vol_coords_zyx = selected_points_xyz[:, [2,1,0]]  # Transform to vol_coords
+        node_data_bbox = vv.getDataBoundingBox(vol_coords_zyx, max_radius)
+        volume_data = vv.getDataInBoundingBox(node_data_bbox)
+        local_coords = vol_coords_zyx - node_data_bbox[0]
+        
+        # Find closest non-zero voxels
+        new_local_coords, distances, success_mask = self.find_closest_voxels(local_coords, volume_data, max_radius)
+        
+        # Transform successful coordinates back to world space
+        new_vol_coords = new_local_coords + node_data_bbox[0]
+        new_points_xyz = new_vol_coords[:, [2,1,0]]  # Transform back to xyz
+        print("new_points_xyz", new_points_xyz[0])
+
+        new_points_xzy = new_points_xyz[:, [0,2,1]]
+        
+        self.movePoints(selected_indices, new_points_xzy, True, True)
     
     #TODO: ensure this works for larger swathes/gets all the relevant data
     def stickyNodeSelection(self, selected_points_xyz, bbox_padding=1):

@@ -1303,7 +1303,7 @@ class DataWindow(QLabel):
         elif e.key() == Qt.Key_P or e.key() == Qt.Key_F:  # Use 'P' key to toggle paint mode
             self.togglePaintMode()
             return
-        elif key == Qt.Key_T:
+        elif key == Qt.Key_H:
             self.toggleStickyMove()
             return
         elif not self.isMovingNode and key == Qt.Key_K:

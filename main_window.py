@@ -1022,41 +1022,14 @@ class BrushControlPanel(QGroupBox):
         
         layout = QFormLayout()
         
-        # Angle threshold spinner
-        self.angle_threshold = QDoubleSpinBox()
-        self.angle_threshold.setRange(0.1, 90.0)
-        self.angle_threshold.setSingleStep(0.5)
-        self.angle_threshold.setDecimals(1)
-        self.angle_threshold.setValue(main_window.draw_settings["brush_control"]["angle_threshold"])
-        self.angle_threshold.valueChanged.connect(self.onAngleThresholdChanged)
-        layout.addRow("Angle Threshold (°):", self.angle_threshold)
-        
-        # Falloff type combo
-        self.falloff_type = QComboBox()
-        self.falloff_type.addItems(["Cosine", "Quadratic"])
-        current_falloff = main_window.draw_settings["brush_control"]["falloff_type"]
-        self.falloff_type.setCurrentText(current_falloff.capitalize())
-        self.falloff_type.currentTextChanged.connect(self.onFalloffTypeChanged)
-        layout.addRow("Falloff Type:", self.falloff_type)
-        
         # Search radius spinner
-        self.search_radius = QDoubleSpinBox()
-        self.search_radius.setRange(1.0, 500.0)
-        self.search_radius.setSingleStep(5.0)
-        self.search_radius.setDecimals(1)
-        self.search_radius.setValue(main_window.draw_settings["brush_control"]["search_radius"])
+        self.search_radius = QSpinBox()
+        self.search_radius.setRange(1, 50)
+        self.search_radius.setSingleStep(1)
+        self.search_radius.setValue(int(main_window.draw_settings["brush_control"]["search_radius"]))
         self.search_radius.valueChanged.connect(self.onSearchRadiusChanged)
         layout.addRow("Search Radius:", self.search_radius)
-        
-        # Minimum effect spinner
-        self.min_effect = QDoubleSpinBox()
-        self.min_effect.setRange(0.0, 1.0)
-        self.min_effect.setSingleStep(0.05)
-        self.min_effect.setDecimals(2)
-        self.min_effect.setValue(main_window.draw_settings["brush_control"]["min_effect"])
-        self.min_effect.valueChanged.connect(self.onMinEffectChanged)
-        layout.addRow("Min Effect:", self.min_effect)
-        
+             
         # Add wrap range multiplier spinner to brush control settings
         self.wrap_range_mult = QDoubleSpinBox()
         self.wrap_range_mult.setRange(0.1, 1000.0)
@@ -1069,25 +1042,14 @@ class BrushControlPanel(QGroupBox):
         layout.addRow("Wrap Range Mult:", self.wrap_range_mult)
         
         self.setLayout(layout)
-    
-    def onAngleThresholdChanged(self, value):
-        self.main_window.draw_settings["brush_control"]["angle_threshold"] = value
-        
-    def onFalloffTypeChanged(self, text):
-        self.main_window.draw_settings["brush_control"]["falloff_type"] = text.lower()
         
     def onSearchRadiusChanged(self, value):
         self.main_window.draw_settings["brush_control"]["search_radius"] = value
         
-    def onMinEffectChanged(self, value):
-        self.main_window.draw_settings["brush_control"]["min_effect"] = value
         
     def updateFromSettings(self):
         settings = self.main_window.draw_settings["brush_control"]
-        self.angle_threshold.setValue(settings["angle_threshold"])
-        self.falloff_type.setCurrentText(settings["falloff_type"].capitalize())
         self.search_radius.setValue(settings["search_radius"])
-        self.min_effect.setValue(settings["min_effect"])
         self.wrap_range_mult.setValue(settings["wrap_range_mult"])
 
 class MainWindow(QMainWindow):
@@ -1123,10 +1085,7 @@ class MainWindow(QMainWindow):
         "paint_mode_enabled": False,
         "sticky_move_enabled": False,
         "brush_control": {
-            "angle_threshold": 5.0,  # degrees
-            "falloff_type": "cosine", # "cosine" or "quadratic"
-            "search_radius": 50.0,  # pixels
-            "min_effect": 0.1,  # minimum effect strength (0-1)
+            "search_radius": 5,  # pixels
             "wrap_range_mult": 1.0,  # multiplier for wrap range in findDominantWrap3D
         },
         "borders": {
@@ -1615,6 +1574,9 @@ class MainWindow(QMainWindow):
         hlayout.addWidget(self.delete_frag)
         self.add_umbilicus_frag = AddUmbilicusButton(self)
         hlayout.addWidget(self.add_umbilicus_frag)
+        
+        self.rebuild_ds = RebuildDataStructuresButton(self)
+        hlayout.addWidget(self.rebuild_ds)
 
         '''
         self.move_frag_up = MoveActiveFragmentAlongZButton(self, "Z ↑", -1)
@@ -2157,6 +2119,7 @@ class MainWindow(QMainWindow):
         self.reparam_frag.setEnabled(active)
         self.retriang_frag.setEnabled(active)
         self.delete_frag.setEnabled(active)
+        self.rebuild_ds.setEnabled(active)
         
         # Only enable add umbilicus button if active fragment is a 3D fragment
         if active and pv is not None:
@@ -3778,6 +3741,20 @@ class MainWindow(QMainWindow):
 
     def keyPressEvent(self, e):
         # print("key press event in main window:", e.key())
+        key = e.key()
+        modifiers = e.modifiers()
+        
+        # Handle Control+D for rebuilding data structures
+        if modifiers & Qt.ControlModifier and key == Qt.Key_D:
+            pv = self.project_view
+            if pv is not None:
+                mfv = pv.mainActiveFragmentView(unaligned_ok=True)
+                if mfv is not None:
+                    mfv.buildKDTrees(recursion_ok=True)
+                    self.drawSlices()
+            return
+
+        # Handle other key events
         if e.key() == Qt.Key_Shift:
             t = time.time()
             # if self.shift_lock_double_click:
@@ -3895,6 +3872,29 @@ class MainWindow(QMainWindow):
                 tijk = list(vv.ijktf)
                 tijk[1] = round(next_z)  # Round before setting
                 vv.ijktf = tijk
+                self.drawSlices()
+        elif e.modifiers() == Qt.ControlModifier and e.key() == Qt.Key_M:
+            # Get active fragment view
+            pv = self.project_view
+            if pv is None:
+                return
+                
+            mfv = pv.mainActiveFragmentView(unaligned_ok=True)
+            if mfv is None:
+                return
+            
+            # Check if brush control settings exist, default to 5 if not
+            max_radius = 5
+            if "brush_control" in self.draw_settings:
+                if "search_radius" in self.draw_settings["brush_control"]:
+                    max_radius = self.draw_settings["brush_control"]["search_radius"]
+                
+            # Check fragment type and selected nodes
+            if (mfv.fragment.type == BaseFragment.Type.TRGL_FRAGMENT and 
+                hasattr(mfv, 'selected_nodes') and 
+                len(mfv.selected_nodes) > 1):
+                # Call moveNodesToData
+                mfv.moveNodesToData(max_radius)
                 self.drawSlices()
         else:
             w = QApplication.widgetAt(QCursor.pos())
@@ -4105,3 +4105,25 @@ class StickyMoveButton(QPushButton):
             self.setStyleSheet("QPushButton { background-color: blue ; padding: 5 }")
         else:
             self.setStyleSheet("QPushButton {padding: 5}")
+
+class RebuildDataStructuresButton(QPushButton):
+    def __init__(self, main_window, parent=None):
+        super(RebuildDataStructuresButton, self).__init__("Rebuild DS", parent)
+        self.main_window = main_window
+        self.setStyleSheet("QPushButton { %s; padding: 5; }"%self.main_window.highlightedBackgroundStyle())
+        self.setEnabled(False)
+        self.setToolTip("Rebuild KD trees and other data structures for the active fragment")
+        self.clicked.connect(self.onButtonClicked)
+
+    def onButtonClicked(self):
+        pv = self.main_window.project_view
+        if pv is None:
+            return
+            
+        mfv = pv.mainActiveFragmentView(unaligned_ok=True)
+        if mfv is None:
+            return
+            
+        # Rebuild KD trees and other data structures
+        mfv.buildKDTrees(recursion_ok=True)
+        self.main_window.drawSlices()
