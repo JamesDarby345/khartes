@@ -6,6 +6,7 @@ from spatial_hash_grid import SpatialHashGrid
 from enum import Enum
 from PyQt5.QtGui import QColor
 import json
+from PyQt5.QtCore import QThread, pyqtSignal
 
 class BaseFragment:
     class Type(Enum):
@@ -228,6 +229,21 @@ class BaseFragment:
     def getType(self):
         return self.type.value if self.type else None
 
+class KDTreeWorker(QThread):
+    finished = pyqtSignal(object)  # Signal to emit when KD-tree is built
+    
+    def __init__(self, points):
+        super().__init__()
+        self.points = points
+        
+    def run(self):
+        try:
+            kd_tree = KDTree(self.points)
+            self.finished.emit(kd_tree)
+        except Exception as e:
+            print(f"Error building KD-tree: {e}")
+            self.finished.emit(None)
+
 class BaseFragmentView:
 
     def __init__(self, project_view, fragment):
@@ -249,6 +265,7 @@ class BaseFragmentView:
         self.k_neighbors = 1   # Default number of neighbors
         self.current_radius = 30.0  # Default radius in global units
         self.selected_nodes = set()  # Store selected node indices
+        self.kd_tree_worker = None  # Worker thread for building KD-tree
 
     def allowAutoExtrapolation(self):
         return False
@@ -500,11 +517,17 @@ class BaseFragmentView:
         
         return axes_list
 
+    def onKDTreeBuilt(self, kd_tree):
+        """Callback when KD-tree is built"""
+        self.kd_tree = kd_tree
+        if self.kd_tree_worker:
+            self.kd_tree_worker.deleteLater()
+            self.kd_tree_worker = None
+
     def buildKDTrees(self, recursion_ok, build_kd_tree=True, build_adjacency_list=True, build_spatial_hash_grid=True):
-        # print("buildKDTrees", recursion_ok, build_kd_tree, build_adjacency_list, build_spatial_hash_grid)
         if not recursion_ok:
             return
-        # print("fragment datastructures; adj list, kdtree, spatial hash grid")
+            
         if not hasattr(self, 'vpoints') or self.vpoints is None or len(self.vpoints) == 0:
             self.kd_tree = None
             self.adjacency_list = None
@@ -516,7 +539,6 @@ class BaseFragmentView:
         if build_adjacency_list:
             print("building adjacency list")
             if trgls is not None and len(trgls) > 0:
-                # print("building adjacency list")
                 stime = time.time()
                 self.adjacency_list = [set() for _ in range(len(self.vpoints))]
                 
@@ -533,24 +555,23 @@ class BaseFragmentView:
                     for i in range(len(trgls)-1):
                         self.adjacency_list[i].add(i+1)
                         self.adjacency_list[i+1].add(i)
-                        
-                # print("adjacency list built in", time.time() - stime)
+                print("adjacency list built in", time.time() - stime)
             else:
                 self.adjacency_list = None
         
-        # Build KD tree using global xyz coordinates
-        if hasattr(self, 'fragment') and hasattr(self.fragment, 'gpoints'):
-            if build_kd_tree:   
-                # print("building kd tree")
-                stime = time.time()
-                self.kd_tree = KDTree(self.fragment.gpoints)
-                # print("kd tree built in", time.time() - stime)
-
-            # if build_spatial_hash_grid:
-            #     # print("building spatial hash grid")
-            #     stime = time.time()
-            #     self.spatial_hash_grid = SpatialHashGrid(self.fragment.gpoints, thickness=10)
-            #     # print("spatial hash grid built in", time.time() - stime)
+        # Build KD tree using global xyz coordinates asynchronously
+        if hasattr(self, 'fragment') and hasattr(self.fragment, 'gpoints') and build_kd_tree:
+            print("starting async KD tree build")
+            # Cancel any existing KD-tree build
+            if self.kd_tree_worker and self.kd_tree_worker.isRunning():
+                self.kd_tree_worker.quit()
+                self.kd_tree_worker.wait()
+            
+            # Start new KD-tree build
+            self.kd_tree_worker = KDTreeWorker(self.fragment.gpoints)
+            self.kd_tree_worker.finished.connect(self.onKDTreeBuilt)
+            self.kd_tree_worker.start()
+            print("KD tree build started in background")
 
     def updateSelectedNodes(self, point_index, k=None, radius=None, use_3d=False):
         """

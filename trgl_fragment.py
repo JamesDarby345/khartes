@@ -576,9 +576,14 @@ class TrglFragment(BaseFragment):
 
         name = pname.stem
         
+        # v list
         vrtl = []
+        # tv list
         tvrtl = []
-        trgl = []
+        # trgl v's
+        vtrgl = []
+        # trgl tv's
+        tvtrgl = []
         
         created = ""
         frag_name = ""
@@ -603,26 +608,51 @@ class TrglFragment(BaseFragment):
                     tvrtl.append([float(w) for w in words[1:]])
             elif words[0] == 'f':
                 if len(words) == 4:
-                    # implicit assumption that v == vt
-                    trgl.append([int(w.split('/')[0])-1 for w in words[1:]])
-        print("tf obj reader", len(vrtl), len(tvrtl), len(trgl))
+                    # in the 'f' lines, v and vt may be different.
+                    # save both for later processing
+                    vs = []
+                    tvs = []
+                    for word in words[1:]:
+                        ws = word.split('/')
+                        v = int(ws[0])-1
+                        if len(ws) > 1:
+                            tv = int(ws[1])-1
+                        else:
+                            tv = v
+                        vs.append(v)
+                        tvs.append(tv)
+                    vtrgl.append(vs)
+                    tvtrgl.append(tvs)
+        print("tf obj reader", len(vrtl), len(tvrtl), len(vtrgl))
         
+        if len(vtrgl) > 0:
+            vtrg = np.array(vtrgl, dtype=np.int32)
+            tvtrg = np.array(tvtrgl, dtype=np.int32)
+        else:
+            vtrg = np.zeros((0,3), dtype=np.int32)
+            tvtrg = np.zeros((0,3), dtype=np.int32)
+
+        if len(vrtl) > 0:
+            vrt = np.array(vrtl, dtype=np.float32)
+        else:
+            vrt = np.zeros((0,3), dtype=np.float32)
+
+        if len(tvrtl) > 0:
+            tvrt = np.array(tvrtl, dtype=np.float32)
+        else:
+            tvrt = np.zeros((0,2), dtype=np.float32)
+
+        otvrt = np.zeros((len(vrt), 2), dtype=np.float32)
+        # otvrt will contain uv values that are listed
+        # in the same order as the xyz values in vrt.
+        otvrt[vtrg.flatten()] = tvrt[tvtrg.flatten()]
+
         if frag_name == "":
-        #     frag_name = name.replace("_",":").replace("p",".")
             frag_name = name
         trgl_frag = TrglFragment(frag_name)
-        if len(vrtl) > 0:
-            trgl_frag.gpoints = np.array(vrtl, dtype=np.float32)
-        else:
-            trgl_frag.gpoints = np.zeros((0,3), dtype=np.float32)
-        if len(tvrtl) > 0:
-            trgl_frag.gtpoints = np.array(tvrtl, dtype=np.float32)
-        else:
-            trgl_frag.gtpoints = np.zeros((0,2), dtype=np.float32)
-        if len(trgl) > 0:
-            trgl_frag.trgls = np.array(trgl, dtype=np.int32)
-        else:
-            trgl_frag.trgls = np.zeros((0,3), dtype=np.int32)
+        trgl_frag.gpoints = vrt
+        trgl_frag.gtpoints = otvrt
+        trgl_frag.trgls = vtrg
         if created == "":
             ts = Utils.vcToTimestamp(name)
             if ts is not None:
@@ -2330,6 +2360,12 @@ class TrglFragmentView(BaseFragmentView):
             return None
         
 
+        if str(z_val) not in self.fragment.params['umbilicus_points']:
+            print(f"No umbilicus point found for z value {z_val}")
+
+            print("umbilicus_points", len(self.fragment.params['umbilicus_points']))
+            print(f"No umbilicus point found for z value {z_val}")
+            return None
         average_umbilicus = self.fragment.params['umbilicus_points'][str(z_val)]
         print("average_umbilicus_point", average_umbilicus)
         # --------------------------------------------------------------------------
@@ -2741,13 +2777,6 @@ class TrglFragmentView(BaseFragmentView):
             # Worker succeeded; we can do final updates (like re-building KD trees, etc.)
             self.fragment.notifyModified()
             self.buildKDTrees(True, True, build_adjacency_list=True, build_spatial_hash_grid=True)
-
-        # Optionally, refresh the GUI or emit a signal that triggers a re-draw
-        if self.project_view is not None and hasattr(self.project_view, 'signalFragmentUpdated'):
-            self.project_view.signalFragmentUpdated.emit(self.fragment)
-
-
-
 
 class TrglPointSet:
 
