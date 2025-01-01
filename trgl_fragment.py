@@ -20,6 +20,53 @@ from fragment import Fragment, FragmentView
 from uv_mapper import UVMapper
 
 from PyQt5.QtGui import QColor
+from PyQt5.QtCore import QObject, QThread, pyqtSignal
+
+class UVUpdateWorker(QObject):
+    """
+    Worker object that performs slow UV adjustments so the GUI remains responsive.
+    """
+    finished = pyqtSignal(object, object)  # emits (ops, nps) or None on failure
+
+    def __init__(self, fragment_view, indices, new_stxys):
+        super().__init__()
+        self.fragment_view = fragment_view
+        self.indices = indices
+        self.new_stxys = new_stxys
+
+    def run(self):
+        """
+        Long-running UV/triangulation updates.
+        This runs in a separate thread.
+        """
+        try:
+            fv = self.fragment_view
+            # We capture the old partial triangulation
+            center_stxy = self.new_stxys.mean(axis=0)
+            max_edge_lengths = np.array([fv.maxStEdgeLengthAroundPoint(idx) for idx in self.indices])
+            max_edge_length = np.max(max_edge_lengths)
+            half_width = fv.half_width_multiplier * fv.avg_st_len
+            half_width = max(half_width, 2.0 * max_edge_length)
+
+            ops = TrglPointSet(fv.all_stpoints, len(fv.stpoints), center_stxy, half_width)
+            osqcm = fv.calculateSqCmOfTrgls(ops.triangulate())
+
+            # Then do the actual fine re-adjustments
+            constrained = fv.adjustStPoints(-1, half_width, center_stxy)
+
+            # Final triangulation
+            nps = TrglPointSet(fv.all_stpoints, len(fv.stpoints), center_stxy, half_width)
+            nsqcm = fv.calculateSqCmOfTrgls(nps.triangulate())
+            dsqcm = nsqcm - osqcm
+            fv.sqcm += dsqcm
+
+            # Apply triangulation changes
+            fv.applyTrglDiff(ops, nps)
+            self.finished.emit(ops, nps)  # success
+        except Exception as e:
+            print("UVUpdateWorker error:", e)
+            self.finished.emit(None, None)  # signal failure
+
 
 class TrglFragment(BaseFragment):
     def __init__(self, name):
@@ -1433,8 +1480,8 @@ class TrglFragmentView(BaseFragmentView):
         axes_list = self.localStAxesBatched(indices)
         timer.time("Get axes")
 
-        # Calculate new positions for all points at once
-        rduijks = np.array([axes.T @ duijk for axes, duijk in zip(axes_list, duijks)])
+        # Calculate new positions for all points at once using vectorized operations
+        rduijks = np.einsum('ijk,ik->ij', np.array([ax.T for ax in axes_list]), duijks)
         old_stxys = self.all_stpoints[indices]
         new_stxys = old_stxys + rduijks[:, :2]
         timer.time("Calculate new positions")
@@ -1445,52 +1492,33 @@ class TrglFragmentView(BaseFragmentView):
             self.vpoints[indices, :3] = new_vijks
             timer.time("Update xyz")
 
-        # Update st coordinates with proper UV adjustment
+        # Only do partial ST updates here; do the heavy-lifting asynchronously
         if update_st:
-            # Find the region affected by all moved points
-            max_edge_lengths = np.array([self.maxStEdgeLengthAroundPoint(idx) for idx in indices])
-            max_edge_length = np.max(max_edge_lengths)
-            half_width = self.half_width_multiplier * self.avg_st_len
-            half_width = max(half_width, 2.0 * max_edge_length)
-
-            # Create a window that encompasses all moved points
-            center_stxy = np.mean(new_stxys, axis=0)
-            max_dist = np.max(np.linalg.norm(new_stxys - center_stxy, axis=1))
-            window_half_width = half_width + max_dist
-
-            # Create TrglPointSet for the entire affected region
-            ops = TrglPointSet(self.all_stpoints, len(self.stpoints), center_stxy, window_half_width)
-            osqcm = self.calculateSqCmOfTrgls(ops.triangulate())
-
-            # Update positions in the window
+            # We do a minimal immediate update of stpoints
             self.stpoints[indices] = new_stxys
             self.all_stpoints[indices] = new_stxys
-
-            # Adjust UV coordinates for the entire affected region
-            constrained = self.adjustStPoints(-1, window_half_width, center_stxy)
-            
-            # Final triangulation update
-            nps = TrglPointSet(self.all_stpoints, len(self.stpoints), center_stxy, window_half_width)
-            nsqcm = self.calculateSqCmOfTrgls(nps.triangulate())
-            dsqcm = nsqcm - osqcm
-            self.sqcm += dsqcm
-            
-            # Apply triangulation changes
-            self.applyTrglDiff(ops, nps)
-
-            # If adjustment wasn't fully constrained, rebuild everything
-            if not constrained:
-                print("movePoints: UV adjustment not fully constrained, rebuilding")
-                self.rebuildStPoints()
-            
-            timer.time("Update st")
+            for i, idx in enumerate(indices):
+                # Update the fragment's UV array quickly
+                uv = self.stxyToUv(new_stxys[i])
+                self.fragment.gtpoints[idx, :] = uv
+                
+        # Rebuild KD trees only if requested and not doing it during st updates
+        elif build_kd_trees:
+            self.buildKDTrees(True, build_kd_trees, 
+                            build_adjacency_list=build_adjacency_list,
+                            build_spatial_hash_grid=build_kd_trees)
 
         self.fragment.notifyModified()
-        if build_kd_trees:
-            self.buildKDTrees(True, build_kd_trees, 
-                             build_adjacency_list=build_adjacency_list,
-                             build_spatial_hash_grid=build_kd_trees)
-        timer.time("Notify modified")
+
+        
+
+        # Trigger the asynchronous UV update if requested
+        if update_st:
+            # We'll launch a background worker that adjusts the UVs more precisely,
+            # recalculates triangulation, etc., while the GUI remains responsive.
+            self.startUVUpdateInThread(indices, new_stxys)
+
+        timer.time("movePoints end")
         return True
 
     def applyTrglDiff(self, ops, nps):
@@ -2682,6 +2710,42 @@ class TrglFragmentView(BaseFragmentView):
 
         self.selected_nodes = final_group
         return final_group
+
+    def startUVUpdateInThread(self, indices, new_stxys):
+        """
+        Spawns a QThread to run the slow UV update in the background.
+        """
+        self.uv_worker_thread = QThread()
+        self.uv_worker = UVUpdateWorker(self, indices, new_stxys)
+        self.uv_worker.moveToThread(self.uv_worker_thread)
+
+        self.uv_worker_thread.started.connect(self.uv_worker.run)
+        self.uv_worker.finished.connect(self.finishUVUpdate)
+        self.uv_worker.finished.connect(self.uv_worker_thread.quit)
+        self.uv_worker.finished.connect(self.uv_worker.deleteLater)
+        self.uv_worker_thread.finished.connect(self.uv_worker_thread.deleteLater)
+
+        self.uv_worker_thread.start()
+
+    def finishUVUpdate(self, ops, nps):
+        """
+        Called when the asynchronous UV update is finished.
+        If successful, the triangulation was updated; if not, we revert or 
+        do a more robust fallback to keep geometry valid.
+        """
+        if ops is None or nps is None:
+            # The worker signaled a failure, revert or handle error.
+            print("Async UV update failed. Rebuilding ST points entirely.")
+            self.rebuildStPoints()
+        else:
+            # Worker succeeded; we can do final updates (like re-building KD trees, etc.)
+            self.fragment.notifyModified()
+            self.buildKDTrees(True, True, build_adjacency_list=True, build_spatial_hash_grid=True)
+
+        # Optionally, refresh the GUI or emit a signal that triggers a re-draw
+        if self.project_view is not None and hasattr(self.project_view, 'signalFragmentUpdated'):
+            self.project_view.signalFragmentUpdated.emit(self.fragment)
+
 
 
 
