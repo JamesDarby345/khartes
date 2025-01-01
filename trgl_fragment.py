@@ -1411,19 +1411,12 @@ class TrglFragmentView(BaseFragmentView):
 
     def movePoints(self, indices, new_vijks, update_xyz, update_st, build_kd_trees=True, build_adjacency_list=False):
         """
-        Move multiple points to new positions.
-        
-        Args:
-            indices: Array of point indices to move
-            new_positions: Array of new positions
-            update_xyz: Whether to update xyz coordinates
-            update_st: Whether to update st coordinates
-            build_kd_trees: Whether to rebuild KD trees (False during dragging)
+        Move multiple points to new positions with proper UV adjustment.
         """
         timer = Utils.Timer()
         timer.active = False
         vv = self.cur_volume_view
-        print("move points called, saving undo state")
+        
         # Save current state for undo
         self.pushFragmentState()
         
@@ -1449,28 +1442,54 @@ class TrglFragmentView(BaseFragmentView):
         # Update xyz coordinates if requested
         if update_xyz:
             self.fragment.gpoints[indices] = new_gijks
-            # Batch update local points
             self.vpoints[indices, :3] = new_vijks
             timer.time("Update xyz")
 
-        # Update st coordinates if requested
+        # Update st coordinates with proper UV adjustment
         if update_st:
-            # Simply update the coordinates without adjusting triangulation
+            # Find the region affected by all moved points
+            max_edge_lengths = np.array([self.maxStEdgeLengthAroundPoint(idx) for idx in indices])
+            max_edge_length = np.max(max_edge_lengths)
+            half_width = self.half_width_multiplier * self.avg_st_len
+            half_width = max(half_width, 2.0 * max_edge_length)
+
+            # Create a window that encompasses all moved points
+            center_stxy = np.mean(new_stxys, axis=0)
+            max_dist = np.max(np.linalg.norm(new_stxys - center_stxy, axis=1))
+            window_half_width = half_width + max_dist
+
+            # Create TrglPointSet for the entire affected region
+            ops = TrglPointSet(self.all_stpoints, len(self.stpoints), center_stxy, window_half_width)
+            osqcm = self.calculateSqCmOfTrgls(ops.triangulate())
+
+            # Update positions in the window
             self.stpoints[indices] = new_stxys
             self.all_stpoints[indices] = new_stxys
-            uvs = np.array([self.stxyToUv(stxy) for stxy in new_stxys])
-            self.fragment.gtpoints[indices] = uvs
+
+            # Adjust UV coordinates for the entire affected region
+            constrained = self.adjustStPoints(-1, window_half_width, center_stxy)
             
-            # Update area calculation
-            old_sqcm = self.calculateSqCmOfTrgls(self.trgls())
-            self.sqcm = old_sqcm
+            # Final triangulation update
+            nps = TrglPointSet(self.all_stpoints, len(self.stpoints), center_stxy, window_half_width)
+            nsqcm = self.calculateSqCmOfTrgls(nps.triangulate())
+            dsqcm = nsqcm - osqcm
+            self.sqcm += dsqcm
+            
+            # Apply triangulation changes
+            self.applyTrglDiff(ops, nps)
+
+            # If adjustment wasn't fully constrained, rebuild everything
+            if not constrained:
+                print("movePoints: UV adjustment not fully constrained, rebuilding")
+                self.rebuildStPoints()
+            
             timer.time("Update st")
 
         self.fragment.notifyModified()
         if build_kd_trees:
             self.buildKDTrees(True, build_kd_trees, 
                              build_adjacency_list=build_adjacency_list,
-                             build_spatial_hash_grid=build_kd_trees)  # Explicitly rebuild KD trees without updating adjacency
+                             build_spatial_hash_grid=build_kd_trees)
         timer.time("Notify modified")
         return True
 
@@ -1876,14 +1895,16 @@ class TrglFragmentView(BaseFragmentView):
                 trgl_stack.append(neigh)
             # print("ts", len(trgl_stack))
         return out_trgls
-    
-    def find_closest_voxels(self,local_coords, volume_data, max_radius=5):
+
+
+
+    def find_closest_voxels(self, local_coords, volume_data, max_radius=5):
         """
-        Find the closest non-zero voxel within max_radius for each coordinate in local_coords.
+        Vectorized version to find the closest non-zero voxel within max_radius for each coordinate.
         
         Args:
             local_coords: numpy array of shape (N, 3) containing Z,Y,X coordinates
-            volume_data: 3D numpy array containing binary volume data (0 or 255)
+            volume_data: 3D numpy array containing binary volume data
             max_radius: maximum search radius in voxels
         
         Returns:
@@ -1891,14 +1912,11 @@ class TrglFragmentView(BaseFragmentView):
             distances: numpy array of shape (N,) containing distances to closest voxels
             success_mask: boolean array indicating which points had a valid closest voxel
         """
-        # Convert volume data to binary
-        binary_volume = (volume_data > 0).astype(np.float32)
-        
-        # Calculate distance transform from non-zero voxels
-        # dist_transform = distance_transform_edt(~binary_volume)
+        # Convert volume data to binary and ensure integer type
+        binary_volume = (volume_data > 0).astype(np.int32)
         
         # Initialize outputs
-        coords = local_coords.astype(np.int32)
+        coords = np.round(local_coords).astype(np.int32)
         n_points = len(coords)
         new_positions = coords.copy()
         distances = np.full(n_points, np.inf)
@@ -1907,56 +1925,70 @@ class TrglFragmentView(BaseFragmentView):
         # Get volume dimensions
         z_max, y_max, x_max = volume_data.shape
         
-        # Create search window
+        # Create search window (vectorized)
         r = max_radius
         z, y, x = np.mgrid[-r:r+1, -r:r+1, -r:r+1]
         sphere_mask = (z*z + y*y + x*x) <= r*r
         offsets = np.column_stack((z[sphere_mask], y[sphere_mask], x[sphere_mask]))
         
-        for i, coord in enumerate(coords):
-            z, y, x = coord
-            
-            # Check if coordinate is within volume bounds
-            if not (0 <= z < z_max and 0 <= y < y_max and 0 <= x < x_max):
-                continue
-                
-            # Generate neighborhood coordinates
-            neighbors = coord + offsets
-            
-            # Filter out of bounds neighbors
-            valid_mask = (
-                (neighbors[:, 0] >= 0) & (neighbors[:, 0] < z_max) &
-                (neighbors[:, 1] >= 0) & (neighbors[:, 1] < y_max) &
-                (neighbors[:, 2] >= 0) & (neighbors[:, 2] < x_max)
-            )
-            valid_neighbors = neighbors[valid_mask]
+        # Create a mask for valid coordinates
+        valid_coords_mask = (
+            (coords[:, 0] >= 0) & (coords[:, 0] < z_max) &
+            (coords[:, 1] >= 0) & (coords[:, 1] < y_max) &
+            (coords[:, 2] >= 0) & (coords[:, 2] < x_max)
+        )
+        
+        # Process only valid coordinates
+        valid_coords = coords[valid_coords_mask]
+        
+        if len(valid_coords) == 0:
+            return new_positions, distances, success_mask
+        
+        # Generate all neighbor coordinates at once
+        # Shape: (n_valid_points, n_offsets, 3)
+        neighbors = valid_coords[:, np.newaxis, :] + offsets[np.newaxis, :, :]
+        
+        # Create bounds mask for all neighbors at once
+        neighbors_valid = (
+            (neighbors[:, :, 0] >= 0) & (neighbors[:, :, 0] < z_max) &
+            (neighbors[:, :, 1] >= 0) & (neighbors[:, :, 1] < y_max) &
+            (neighbors[:, :, 2] >= 0) & (neighbors[:, :, 2] < x_max)
+        )
+        
+        # Process each valid coordinate
+        for i, (coord, neighbor_set, valid_mask) in enumerate(zip(valid_coords, neighbors, neighbors_valid)):
+            valid_neighbors = neighbor_set[valid_mask].astype(np.int32)
             
             if len(valid_neighbors) == 0:
                 continue
                 
-            # Get values and distances for valid neighbors
-            neighbor_values = binary_volume[valid_neighbors[:, 0], 
-                                        valid_neighbors[:, 1], 
-                                        valid_neighbors[:, 2]]
+            # Get values for all valid neighbors at once
+            neighbor_values = binary_volume[
+                valid_neighbors[:, 0],
+                valid_neighbors[:, 1],
+                valid_neighbors[:, 2]
+            ]
             
             non_zero_mask = neighbor_values > 0
             if not np.any(non_zero_mask):
                 continue
                 
-            # Calculate distances to non-zero neighbors
+            # Calculate distances to all non-zero neighbors at once
             non_zero_neighbors = valid_neighbors[non_zero_mask]
             squared_distances = np.sum((non_zero_neighbors - coord) ** 2, axis=1)
             min_dist_idx = np.argmin(squared_distances)
             min_distance = np.sqrt(squared_distances[min_dist_idx])
             
             if min_distance <= max_radius:
-                new_positions[i] = non_zero_neighbors[min_dist_idx]
-                distances[i] = min_distance
-                success_mask[i] = True
+                idx = np.where(valid_coords_mask)[0][i]
+                new_positions[idx] = non_zero_neighbors[min_dist_idx]
+                distances[idx] = min_distance
+                success_mask[idx] = True
         
         return new_positions, distances, success_mask
-
+    
     def moveNodesToData(self, max_radius=5):
+        import time
         """
         Modified version of moveNodesToData that finds closest non-zero voxels.
         """
@@ -1971,11 +2003,17 @@ class TrglFragmentView(BaseFragmentView):
         vv = self.cur_volume_view
         vol_coords_zyx = selected_points_xyz[:, [2,1,0]]  # Transform to vol_coords
         node_data_bbox = vv.getDataBoundingBox(vol_coords_zyx, max_radius)
+        stime = time.time()
         volume_data = vv.getDataInBoundingBox(node_data_bbox)
-        local_coords = vol_coords_zyx - node_data_bbox[0]
+        etime = time.time()
+        print("get voumetric data time", etime-stime)
+        local_coords = np.round(vol_coords_zyx - node_data_bbox[0]).astype(np.int32)
         
         # Find closest non-zero voxels
+        stime = time.time()
         new_local_coords, distances, success_mask = self.find_closest_voxels(local_coords, volume_data, max_radius)
+        etime = time.time()
+        print("find closest voxels time", etime-stime)
         
         # Transform successful coordinates back to world space
         new_vol_coords = new_local_coords + node_data_bbox[0]

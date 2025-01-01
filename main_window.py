@@ -3754,6 +3754,13 @@ class MainWindow(QMainWindow):
                     self.drawSlices()
             return
 
+        # Handle 's' key for sticky move toggle in paint mode
+        if key == Qt.Key_S and not modifiers:
+            if self.draw_settings.get('paint_mode_enabled', False):
+                # Toggle sticky move when in paint mode
+                self.sticky_move_button.onButtonClicked(True)
+                return
+                
         # Handle other key events
         if e.key() == Qt.Key_Shift:
             t = time.time()
