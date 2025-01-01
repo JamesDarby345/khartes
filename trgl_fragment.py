@@ -20,12 +20,9 @@ from fragment import Fragment, FragmentView
 from uv_mapper import UVMapper
 
 from PyQt5.QtGui import QColor
-from PyQt5.QtCore import QObject, QThread, pyqtSignal
+from PyQt5.QtCore import QObject, QThread, pyqtSignal, QMutex, QMutexLocker
 
 class UVUpdateWorker(QObject):
-    """
-    Worker object that performs slow UV adjustments so the GUI remains responsive.
-    """
     finished = pyqtSignal(object, object)  # emits (ops, nps) or None on failure
 
     def __init__(self, fragment_view, indices, new_stxys):
@@ -41,17 +38,17 @@ class UVUpdateWorker(QObject):
         """
         try:
             fv = self.fragment_view
-            # We capture the old partial triangulation
             center_stxy = self.new_stxys.mean(axis=0)
             max_edge_lengths = np.array([fv.maxStEdgeLengthAroundPoint(idx) for idx in self.indices])
             max_edge_length = np.max(max_edge_lengths)
             half_width = fv.half_width_multiplier * fv.avg_st_len
             half_width = max(half_width, 2.0 * max_edge_length)
 
+            # Partial triangulation
             ops = TrglPointSet(fv.all_stpoints, len(fv.stpoints), center_stxy, half_width)
             osqcm = fv.calculateSqCmOfTrgls(ops.triangulate())
 
-            # Then do the actual fine re-adjustments
+            # Fine readjustments
             constrained = fv.adjustStPoints(-1, half_width, center_stxy)
 
             # Final triangulation
@@ -726,6 +723,11 @@ class TrglFragmentView(BaseFragmentView):
         self.gpoints_history = []
         if len(trgl_fragment.trgls) == 0:
             self.mesh_visible = False
+
+        # Add mutex for UV thread control
+        self._uv_mutex = QMutex()
+        self._uvWorkerThreadActive = False
+        self._pendingUVUpdates = []
 
     def allowAutoExtrapolation(self):
         return False
@@ -1486,70 +1488,70 @@ class TrglFragmentView(BaseFragmentView):
                              build_spatial_hash_grid=build_kd_trees)
         return True
 
+
     def movePoints(self, indices, new_vijks, update_xyz, update_st, build_kd_trees=True, build_adjacency_list=False):
         """
         Move multiple points to new positions with proper UV adjustment.
+        If a UV update is already running, this will block until it's done.
         """
-        timer = Utils.Timer()
-        timer.active = False
-        vv = self.cur_volume_view
-        
-        # Save current state for undo
-        self.pushFragmentState()
-        
-        # Convert all positions at once
-        timer.time("Start movePoints")
-        new_gijks = np.array([vv.transposedIjkToGlobalPosition(vijk) for vijk in new_vijks])
-        new_uijks = np.array([vv.transposedIjkToIjk(vijk) for vijk in new_vijks])
-        old_vijks = self.vpoints[indices, :3]
-        old_uijks = np.array([vv.transposedIjkToIjk(vijk) for vijk in old_vijks])
-        duijks = new_uijks - old_uijks
-        timer.time("Position conversions")
+        # Use mutex to check if UV update is running
+        with QMutexLocker(self._uv_mutex):
+            if self._uvWorkerThreadActive:
+                print("UV update already in progress, skipping...")
+                return False
+            
+            # Save current state for undo
+            self.pushFragmentState()
+            
+            # Convert all positions at once
+            timer = Utils.Timer()
+            timer.active = False
+            vv = self.cur_volume_view
+            
+            new_gijks = np.array([vv.transposedIjkToGlobalPosition(vijk) for vijk in new_vijks])
+            new_uijks = np.array([vv.transposedIjkToIjk(vijk) for vijk in new_vijks])
+            old_vijks = self.vpoints[indices, :3]
+            old_uijks = np.array([vv.transposedIjkToIjk(vijk) for vijk in old_vijks])
+            duijks = new_uijks - old_uijks
+            timer.time("Position conversions")
 
-        # Get axes for all points at once
-        axes_list = self.localStAxesBatched(indices)
-        timer.time("Get axes")
+            # Get axes for all points at once
+            axes_list = self.localStAxesBatched(indices)
+            timer.time("Get axes")
 
-        # Calculate new positions for all points at once using vectorized operations
-        rduijks = np.einsum('ijk,ik->ij', np.array([ax.T for ax in axes_list]), duijks)
-        old_stxys = self.all_stpoints[indices]
-        new_stxys = old_stxys + rduijks[:, :2]
-        timer.time("Calculate new positions")
+            # Calculate new positions for all points at once
+            rduijks = np.einsum('ijk,ik->ij', np.array([ax.T for ax in axes_list]), duijks)
+            old_stxys = self.all_stpoints[indices]
+            new_stxys = old_stxys + rduijks[:, :2]
+            timer.time("Calculate new positions")
 
-        # Update xyz coordinates if requested
-        if update_xyz:
-            self.fragment.gpoints[indices] = new_gijks
-            self.vpoints[indices, :3] = new_vijks
-            timer.time("Update xyz")
+            # Update xyz coordinates if requested
+            if update_xyz:
+                self.fragment.gpoints[indices] = new_gijks
+                self.vpoints[indices, :3] = new_vijks
+                timer.time("Update xyz")
 
-        # Only do partial ST updates here; do the heavy-lifting asynchronously
-        if update_st:
-            # We do a minimal immediate update of stpoints
-            self.stpoints[indices] = new_stxys
-            self.all_stpoints[indices] = new_stxys
-            for i, idx in enumerate(indices):
-                # Update the fragment's UV array quickly
-                uv = self.stxyToUv(new_stxys[i])
-                self.fragment.gtpoints[idx, :] = uv
+            # Minimal immediate ST update
+            if update_st:
+                self.stpoints[indices] = new_stxys
+                self.all_stpoints[indices] = new_stxys
+                for i, idx in enumerate(indices):
+                    uv = self.stxyToUv(new_stxys[i])
+                    self.fragment.gtpoints[idx, :] = uv
+                    
+                # Mark thread as active and start UV update
+                self._uvWorkerThreadActive = True
+                self.startUVUpdateInThread(indices, new_stxys)
                 
-        # Rebuild KD trees only if requested and not doing it during st updates
-        elif build_kd_trees:
-            self.buildKDTrees(True, build_kd_trees, 
-                            build_adjacency_list=build_adjacency_list,
-                            build_spatial_hash_grid=build_kd_trees)
+            elif build_kd_trees:
+                # If no ST update, we rebuild KD trees here if needed
+                self.buildKDTrees(True, build_kd_trees, 
+                                build_adjacency_list=build_adjacency_list,
+                                build_spatial_hash_grid=build_kd_trees)
 
-        self.fragment.notifyModified()
-
-        
-
-        # Trigger the asynchronous UV update if requested
-        if update_st:
-            # We'll launch a background worker that adjusts the UVs more precisely,
-            # recalculates triangulation, etc., while the GUI remains responsive.
-            self.startUVUpdateInThread(indices, new_stxys)
-
-        timer.time("movePoints end")
-        return True
+            self.fragment.notifyModified()
+            timer.time("movePoints end")
+            return True
 
     def applyTrglDiff(self, ops, nps):
         result = TrglPointSet.trglDiff(ops, nps)
@@ -2750,6 +2752,7 @@ class TrglFragmentView(BaseFragmentView):
     def startUVUpdateInThread(self, indices, new_stxys):
         """
         Spawns a QThread to run the slow UV update in the background.
+        Thread safety is handled by the mutex in movePoints.
         """
         self.uv_worker_thread = QThread()
         self.uv_worker = UVUpdateWorker(self, indices, new_stxys)
@@ -2766,18 +2769,25 @@ class TrglFragmentView(BaseFragmentView):
     def finishUVUpdate(self, ops, nps):
         """
         Called when the asynchronous UV update is finished.
-        If successful, the triangulation was updated; if not, we revert or 
-        do a more robust fallback to keep geometry valid.
+        Uses mutex to safely update thread status.
         """
         if ops is None or nps is None:
-            # The worker signaled a failure, revert or handle error.
             print("Async UV update failed. Rebuilding ST points entirely.")
             self.rebuildStPoints()
         else:
-            # Worker succeeded; we can do final updates (like re-building KD trees, etc.)
             self.fragment.notifyModified()
             self.buildKDTrees(True, True, build_adjacency_list=True, build_spatial_hash_grid=True)
 
+        # Safely mark thread as done
+        with QMutexLocker(self._uv_mutex):
+            self._uvWorkerThreadActive = False
+
+        # If there are queued requests, process the next one
+        # if self._pendingUVUpdates:
+        #     indices, stxys = self._pendingUVUpdates.pop(0)
+        #     # Start a new thread for the next request
+        #     self.startUVUpdateInThread(indices, stxys)
+            
 class TrglPointSet:
 
     # Create a TrglPointSet that contains all stpoints

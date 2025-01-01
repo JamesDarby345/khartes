@@ -2578,7 +2578,7 @@ class FragmentVao:
         # Access getDrawWidth through gldw
         normal_size = self.gldw.getDrawWidth("node")  
         free_size = self.gldw.getDrawWidth("free_node")
-        manual_size = int(normal_size*1.5)
+        manual_size = int(normal_size*2)
 
         # Create array of default sizes for all nodes
         sizes = np.full((len(fv.vpoints),), normal_size, dtype=np.float32)
