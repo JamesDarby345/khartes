@@ -7,6 +7,7 @@ import numpy as np
 import time
 import os
 from math import cos, sin, pi
+import json
 
 def calculate_direction_extents(volume_view, z_point, num_directions=8):
     """Calculate radial extents in different directions based on volume mask
@@ -123,6 +124,9 @@ def create_swiss_roll_obj(values, umbilicus_points=None, direction_extents=None,
     z_points = np.arange(z_min, z_max + z_step, z_step)
     print("z_points", z_points)
     
+    # Store umbilicus points in the correct format
+    umbilicus_dict = {}
+    
     # Umbilicus interpolation (if applicable)
     if use_umbilicus and umbilicus_points is not None and len(umbilicus_points) > 1:
         sorted_points = sorted(umbilicus_points, key=lambda p: p[2])
@@ -132,12 +136,22 @@ def create_swiss_roll_obj(values, umbilicus_points=None, direction_extents=None,
         
         x_positions = np.interp(z_points, umbilicus_z, umbilicus_x)
         y_positions = np.interp(z_points, umbilicus_z, umbilicus_y)
+        
+        # Store interpolated umbilicus points in dictionary format
+        for i, z in enumerate(z_points):
+            umbilicus_dict[str(int(z))] = [float(x_positions[i]), float(y_positions[i]), float(z)]
     else:
         x_positions = np.full_like(z_points, x_loc)
         y_positions = np.full_like(z_points, y_loc)
+        
+        # Store fixed umbilicus points in dictionary format
+        for i, z in enumerate(z_points):
+            umbilicus_dict[str(int(z))] = [float(x_loc), float(y_loc), float(z)]
 
     with open(filename, 'w') as f:
         f.write("# Swiss Roll OBJ File\n")
+        f.write("# Created: %s\n" % timestamp)
+        f.write("# Umbilicus Points: %s\n" % json.dumps(umbilicus_dict))
         
         # For each z-slice
         for z_idx, z in enumerate(z_points):
@@ -216,7 +230,7 @@ def create_swiss_roll_obj(values, umbilicus_points=None, direction_extents=None,
                 f.write(f"f {v1}/{v1} {v2}/{v2} {v3}/{v3}\n")
                 f.write(f"f {v1}/{v1} {v3}/{v3} {v4}/{v4}\n")
 
-    return filename
+    return filename, umbilicus_dict
 
 
 class SwissRollDialog(QDialog):

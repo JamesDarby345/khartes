@@ -1119,7 +1119,7 @@ class MainWindow(QMainWindow):
         "retriangulate_enabled": True,  # Default to enabled
         "autosave": {
             "enabled": True,
-            "interval": 60  # seconds
+            "interval": 600  # seconds
         },
         "move_node_enabled": False,
     }
@@ -2422,15 +2422,20 @@ class MainWindow(QMainWindow):
                 width = values['total_width']
                 directional_extents = [width/2] * values['num_directions']
                 
-            filename = create_swiss_roll_obj(values, umbilicus_points, directional_extents)
+            filename, umbilicus_dict = create_swiss_roll_obj(values, umbilicus_points, directional_extents)
             
             # Store both points per wrap and umbilicus points if they were used
             params = {}
-            params['pts_per_wrap'] = values['xy_roll_points'] // values['wraps']
-            if umbilicus_points is not None and len(umbilicus_points) > 0:
-                params['umbilicus_points'] = umbilicus_points
+            if umbilicus_dict is not None and len(umbilicus_dict) > 0:
+                params['umbilicus_points'] = umbilicus_dict
                 
             self.loadObjFile(filename, params)
+
+            # Clean up temporary file
+            try:
+                os.remove(filename)
+            except:
+                pass
 
     def reparameterizeActiveFragment(self):
         pv = self.project_view
